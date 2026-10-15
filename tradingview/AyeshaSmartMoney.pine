@@ -1,0 +1,470 @@
+//@version=6
+// AYESHA | Smart Money & ICT Compass  (chart helper, phase 6)
+// GENERATED from AyeshaSmartMoney.template.pine by scripts/generate_pine.py (strategy 0.2.0 #c6bbd8eb269f).
+// Do not edit AyeshaSmartMoney.pine directly; edit the template and regenerate.
+//
+// TradingView-first setup: this indicator finds SWEEP -> MSS -> FVG setups on TradingView's own
+// feed, draws WHY on the chart (numbered steps 1-4) and fires an alert() that TradingView pushes
+// to your phone. Lot size is an ESTIMATE from your inputs (assumed Exness contract sizes); it
+// cannot read your Exness balance, real spread or the news calendar. It never places orders.
+indicator("AYESHA | Smart Money & ICT Compass", shorttitle = "AYESHA", overlay = true,
+     max_boxes_count = 100, max_lines_count = 200, max_labels_count = 200)
+
+STRATEGY_VERSION = "0.2.0"
+STRATEGY_HASH = "c6bbd8eb269f"
+
+// ---------------------------------------------------------------- inputs
+grpQ = "Quick"
+viewMode = input.string("Clean", "View", options = ["Clean", "Analyst", "Full"], group = grpQ)
+spreadPips = input.float(0.8, "Assumed spread (pips)", minval = 0, group = grpQ, tooltip = "TradingView does not know your broker spread")
+
+grpR = "ICT/SMC rules (defaults = strategy-spec.yaml)"
+atrLen = input.int(14, "ATR period", group = grpR)
+swingL = input.int(3, "Swing left bars", group = grpR)
+swingR = input.int(3, "Swing right bars", group = grpR)
+bosBufAtr = input.float(0.05, "BOS buffer x ATR", group = grpR)
+dispBodyAtr = input.float(1.2, "Displacement body x ATR", group = grpR)
+dispBodyFrac = input.float(0.6, "Displacement body/range", group = grpR)
+fvgMinAtr = input.float(0.1, "FVG min gap x ATR", group = grpR)
+fvgMaxAge = input.int(40, "FVG max age (bars)", group = grpR)
+eqTolAtr = input.float(0.1, "EQH/EQL tolerance x ATR", group = grpR)
+sweepPenAtr = input.float(0.05, "Sweep min penetration x ATR", group = grpR)
+reclaimBars = input.int(3, "Sweep reclaim bars", group = grpR)
+mssWithin = input.int(12, "MSS within bars of sweep", group = grpR)
+
+grpE = "Trade proposal"
+entryMode = input.string("proximal", "Entry", options = ["proximal", "midpoint"], group = grpE)
+slBufAtr = input.float(0.1, "SL buffer x ATR", group = grpE)
+minRR = input.float(2.0, "Min net RR", group = grpE)
+slipPips = input.float(0.3, "Slippage buffer (pips)", group = grpE)
+expiryBars = input.int(8, "Entry expiry (bars)", group = grpE)
+
+grpA = "Account & alerts"
+equityUsd = input.float(20, "Account equity (USD)", minval = 0, group = grpA, tooltip = "Type your current Exness equity. Cent account: USC / 100.")
+riskPct = input.float(0.5, "Risk per trade %", minval = 0.1, maxval = 1.0, step = 0.1, group = grpA)
+acctType = input.string("Standard", "Exness account type", options = ["Standard", "StandardCent"], group = grpA)
+alertNoTrade = input.bool(false, "Also alert when lot is too big (NO TRADE)", group = grpA)
+keepPlans = input.int(5, "Keep last N setups on chart", minval = 1, maxval = 20, group = grpA)
+
+grpV = "Visual"
+showSessions = input.bool(true, "Session background", group = grpV)
+showLevels = input.bool(true, "PDH/PDL and Asia range", group = grpV)
+colBull = input.color(#16A34A, "Bull", group = grpV)
+colBear = input.color(#DC2626, "Bear", group = grpV)
+colWatch = input.color(#EAB308, "Watch", group = grpV)
+colFvg = input.color(color.new(#06B6D4, 80), "FVG", group = grpV)
+colLiq = input.color(#94A3B8, "Liquidity", group = grpV)
+colEntry = input.color(color.new(#38BDF8, 75), "Entry zone", group = grpV)
+colSL = input.color(#EF4444, "SL", group = grpV)
+colTP = input.color(#14B8A6, "TP", group = grpV)
+colOff = input.color(#64748B, "Invalidated", group = grpV)
+
+analyst = viewMode != "Clean"
+full = viewMode == "Full"
+pip = syminfo.mintick * (syminfo.mintick == 0.001 or syminfo.mintick == 0.00001 ? 10 : 1)
+spreadPx = spreadPips * pip
+slipPx = slipPips * pip
+contractUnits = acctType == "Standard" ? 100000.0 : 1000.0
+quoteUsd = request.currency_rate(syminfo.currency, "USD", ignore_invalid_currency = true)
+pipValuePerLot = contractUnits * pip * quoteUsd  // USD per pip for 1.00 lot
+
+// ---------------------------------------------------------------- sessions (IANA zones, DST-safe)
+minsOf(int t, string tz) => hour(t, tz) * 60 + minute(t, tz)
+inWin(int t, string tz, int startM, int endM) =>
+    m = minsOf(t, tz)
+    d = dayofweek(t, tz)
+    d != dayofweek.saturday and d != dayofweek.sunday and m >= startM and m < endM
+
+londonNow = inWin(time, "Europe/London", 480, 1020)
+nyNow = inWin(time, "America/New_York", 480, 1020)
+tokyoNow = inWin(time, "Asia/Tokyo", 540, 1080)
+asiaNow = inWin(time, "Asia/Tokyo", 540, 900)
+
+// tradeable at bar CLOSE, mirroring the Python scanner
+tradeableAtClose() =>
+    tc = time_close
+    nyD = dayofweek(tc, "America/New_York")
+    nyM = minsOf(tc, "America/New_York")
+    mktOpen = not (nyD == dayofweek.saturday or (nyD == dayofweek.friday and nyM >= 17 * 60) or (nyD == dayofweek.sunday and nyM < 17 * 60))
+    roll = nyM >= 1015 and nyM < 1030
+    sess = inWin(tc, "Europe/London", 480, 1020) or inWin(tc, "America/New_York", 480, 1020)
+    mktOpen and not roll and sess
+
+bgcolor(showSessions and londonNow and nyNow ? color.new(colWatch, 93) : showSessions and londonNow ? color.new(#2563EB, 95) : showSessions and nyNow ? color.new(#8B5CF6, 95) : showSessions and tokyoNow and full ? color.new(colLiq, 96) : na, title = "Sessions")
+
+// ---------------------------------------------------------------- core series
+atr = ta.atr(atrLen)
+body = math.abs(close - open)
+rng = high - low
+dispDir(float b, float r, float a, float c, float o) =>
+    na(a) or r <= 0 ? 0 : b >= dispBodyAtr * a and b / r >= dispBodyFrac ? (c > o ? 1 : c < o ? -1 : 0) : 0
+disp = dispDir(body, rng, atr, close, open)
+
+// ---------------------------------------------------------------- liquidity levels
+type Level
+    string name
+    int side
+    float price
+    int created
+    int breachBar
+    float extreme
+    bool consumed
+    line ln
+
+var array<Level> levels = array.new<Level>()
+
+addLevel(string name, int side, float price) =>
+    isDaily = name == "PDH" or name == "PDL" or name == "ASIA_H" or name == "ASIA_L"
+    line ln = na
+    if (showLevels and isDaily) or (analyst and not isDaily)
+        ln := line.new(bar_index, price, bar_index + 1, price, extend = extend.right, color = colLiq, style = isDaily ? line.style_dashed : line.style_dotted, width = 1)
+    array.push(levels, Level.new(name, side, price, bar_index - 1, na, na, false, ln))
+    if array.size(levels) > 60
+        old = array.shift(levels)
+        if not na(old.ln)
+            line.delete(old.ln)
+
+consumeLevel(Level lv) =>
+    lv.consumed := true
+    if not na(lv.ln)
+        line.set_extend(lv.ln, extend.none)
+        line.set_x2(lv.ln, bar_index)
+        line.set_color(lv.ln, colOff)
+
+// previous trading day (TradingView FX daily bars close 17:00 New York), confirmed values only
+[pdh, pdl] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+newDay = ta.change(time("D")) != 0
+if newDay and not na(pdh) and barstate.isconfirmed
+    addLevel("PDH", 1, pdh)
+    addLevel("PDL", -1, pdl)
+
+var float asiaH = na
+var float asiaL = na
+if asiaNow
+    asiaH := na(asiaH) ? high : math.max(asiaH, high)
+    asiaL := na(asiaL) ? low : math.min(asiaL, low)
+if not asiaNow and asiaNow[1] and not na(asiaH)
+    addLevel("ASIA_H", 1, asiaH)
+    addLevel("ASIA_L", -1, asiaL)
+    asiaH := na
+    asiaL := na
+
+// ---------------------------------------------------------------- sweeps (before structure, as in Python)
+var int armedBullBar = na
+var float armedBullExt = na
+var string armedBullName = ""
+var int armedBearBar = na
+var float armedBearExt = na
+var string armedBearName = ""
+
+if barstate.isconfirmed and not na(atr)
+    pen = sweepPenAtr * atr
+    for lv in levels
+        if lv.consumed or lv.created >= bar_index
+            continue
+        pierced = lv.side == -1 ? low < lv.price - pen : high > lv.price + pen
+        backIn = lv.side == -1 ? close > lv.price : close < lv.price
+        beyond = lv.side == -1 ? low : high
+        if na(lv.breachBar)
+            if pierced
+                lv.breachBar := bar_index
+                lv.extreme := beyond
+            else
+                continue
+        else
+            lv.extreme := lv.side == -1 ? math.min(lv.extreme, beyond) : math.max(lv.extreme, beyond)
+        if backIn
+            consumeLevel(lv)
+            if lv.side == -1
+                armedBullBar := bar_index
+                armedBullExt := lv.extreme
+                armedBullName := lv.name
+            else
+                armedBearBar := bar_index
+                armedBearExt := lv.extreme
+                armedBearName := lv.name
+            if analyst
+                label.new(bar_index, lv.side == -1 ? low : high, lv.name + " swept", style = lv.side == -1 ? label.style_label_up : label.style_label_down, color = color.new(colWatch, 20), textcolor = color.black, size = size.tiny)
+        else if bar_index - lv.breachBar >= reclaimBars
+            consumeLevel(lv)
+
+// ---------------------------------------------------------------- structure (BOS / CHoCH / MSS)
+var array<float> shP = array.new<float>()
+var array<float> slP = array.new<float>()
+var int trend = 0
+bullBreak = false
+bearBreak = false
+bullDisp = false
+bearDisp = false
+if barstate.isconfirmed and not na(atr)
+    buf = bosBufAtr * atr
+    if array.size(shP) > 0 and close > array.last(shP) + buf
+        lvl = array.pop(shP)
+        for lv in levels
+            if lv.side == 1 and not lv.consumed and (str.startswith(lv.name, "SWING") or str.startswith(lv.name, "EQ")) and lv.price == lvl
+                consumeLevel(lv)
+        kind = trend == -1 ? "CHoCH" : "BOS"
+        bullBreak := true
+        bullDisp := disp == 1
+        trend := 1
+        if analyst or (kind == "CHoCH" and bullDisp)
+            label.new(bar_index, high, kind == "CHoCH" and bullDisp ? "MSS ▲" : kind + " ▲", style = label.style_label_down, color = color.new(colBull, 30), textcolor = color.white, size = size.tiny)
+    if array.size(slP) > 0 and close < array.last(slP) - buf
+        lvl = array.pop(slP)
+        for lv in levels
+            if lv.side == -1 and not lv.consumed and (str.startswith(lv.name, "SWING") or str.startswith(lv.name, "EQ")) and lv.price == lvl
+                consumeLevel(lv)
+        kind = trend == 1 ? "CHoCH" : "BOS"
+        bearBreak := true
+        bearDisp := disp == -1
+        trend := -1
+        if analyst or (kind == "CHoCH" and bearDisp)
+            label.new(bar_index, low, kind == "CHoCH" and bearDisp ? "MSS ▼" : kind + " ▼", style = label.style_label_up, color = color.new(colBear, 30), textcolor = color.white, size = size.tiny)
+
+// ---------------------------------------------------------------- swings (confirmed at k + right bars)
+ph = ta.pivothigh(high, swingL, swingR)
+pl = ta.pivotlow(low, swingL, swingR)
+hiCloseR = ta.highest(close, swingR)
+loCloseR = ta.lowest(close, swingR)
+if barstate.isconfirmed and not na(atr)
+    buf = bosBufAtr * atr
+    tol = eqTolAtr * atr
+    if not na(ph) and not (hiCloseR > ph + buf)
+        name = "SWING_H"
+        price = ph
+        n = array.size(shP)
+        if n > 0
+            for j = math.max(0, n - 5) to n - 1
+                p = array.get(shP, j)
+                if math.abs(p - ph) <= tol
+                    name := "EQH"
+                    price := math.max(price, p)
+        array.push(shP, ph)
+        addLevel(name, 1, price)
+    if not na(pl) and not (loCloseR < pl - buf)
+        name = "SWING_L"
+        price = pl
+        n = array.size(slP)
+        if n > 0
+            for j = math.max(0, n - 5) to n - 1
+                p = array.get(slP, j)
+                if math.abs(p - pl) <= tol
+                    name := "EQL"
+                    price := math.min(price, p)
+        array.push(slP, pl)
+        addLevel(name, -1, price)
+    if array.size(shP) > 50
+        array.shift(shP)
+    if array.size(slP) > 50
+        array.shift(slP)
+
+// ---------------------------------------------------------------- FVG
+type Gap
+    int dir
+    float top
+    float bottom
+    int created
+    bool mitigated
+    bool invalid
+    box bx
+
+var array<Gap> gaps = array.new<Gap>()
+if barstate.isconfirmed and not na(atr)
+    minGap = fvgMinAtr * atr
+    if low - high[2] >= minGap and low > high[2]
+        bx = analyst ? box.new(bar_index - 2, low, bar_index + 5, high[2], border_color = na, bgcolor = colFvg) : na
+        array.push(gaps, Gap.new(1, low, high[2], bar_index, false, false, bx))
+    if low[2] - high >= minGap and high < low[2]
+        bx = analyst ? box.new(bar_index - 2, low[2], bar_index + 5, high, border_color = na, bgcolor = colFvg) : na
+        array.push(gaps, Gap.new(-1, low[2], high, bar_index, false, false, bx))
+    for g in gaps
+        if g.invalid or g.created == bar_index
+            continue
+        if bar_index - g.created > fvgMaxAge
+            g.invalid := true
+        else if g.dir == 1
+            if low <= g.top
+                g.mitigated := true
+            if close < g.bottom
+                g.invalid := true
+        else
+            if high >= g.bottom
+                g.mitigated := true
+            if close > g.top
+                g.invalid := true
+        if not na(g.bx)
+            if g.invalid
+                box.delete(g.bx)
+                g.bx := na
+            else
+                box.set_right(g.bx, bar_index + 1)
+                if g.mitigated
+                    box.set_bgcolor(g.bx, color.new(#06B6D4, 92))
+    while array.size(gaps) > 60
+        old = array.shift(gaps)
+        if not na(old.bx)
+            box.delete(old.bx)
+
+// ---------------------------------------------------------------- SWEEP -> MSS -> FVG candidate
+var string setupState = "WAIT"
+
+type Plan
+    int d
+    int bar
+    line e
+    line s
+    line t
+    label lb
+    label swLb
+    label mssLb
+    box fvgBx
+
+var array<Plan> plans = array.new<Plan>()
+
+deletePlan(Plan p) =>
+    line.delete(p.e)
+    line.delete(p.s)
+    line.delete(p.t)
+    label.delete(p.lb)
+    label.delete(p.swLb)
+    label.delete(p.mssLb)
+    box.delete(p.fvgBx)
+
+// lot estimate: floor to 0.01, never round up; NO TRADE if even 0.01 lot risks more than the budget
+lotCalc(float lossPx) =>
+    lossPips = lossPx / pip
+    perLot = lossPips * pipValuePerLot
+    budget = equityUsd * riskPct / 100
+    lot = perLot > 0 ? math.floor(budget / perLot * 100 + 1e-9) / 100 : 0.0
+    minLoss = 0.01 * perLot
+    [lot, lot * perLot, minLoss, budget]
+
+buildPlan(int d, int swBar, float swExt, string swName) =>
+    // freshest unmitigated FVG in direction d created since the sweep
+    Gap fvg = na
+    n = array.size(gaps)
+    if n > 0
+        for i = n - 1 to 0
+            g = array.get(gaps, i)
+            if g.dir == d and g.created >= swBar - 2 and not g.mitigated and not g.invalid
+                fvg := g
+                break
+    string state = "WAIT (no fresh FVG)"
+    string msg = ""
+    bool ok = false
+    if not na(fvg)
+        entry = entryMode == "midpoint" ? (fvg.top + fvg.bottom) / 2 : d == 1 ? fvg.top : fvg.bottom
+        stop = d == 1 ? swExt - slBufAtr * atr : swExt + slBufAtr * atr
+        loss = math.abs(entry - stop) + spreadPx + slipPx
+        float bestT = na
+        float bestRR = na
+        string bestName = ""
+        for lv in levels
+            if lv.consumed or lv.side != d or (lv.price - entry) * d <= 0
+                continue
+            rr = (math.abs(lv.price - entry) - spreadPx) / loss
+            if rr >= minRR and (na(bestT) or math.abs(lv.price - entry) < math.abs(bestT - entry))
+                bestT := lv.price
+                bestRR := rr
+                bestName := lv.name
+        if na(bestT)
+            state := "WAIT (no target with RR >= " + str.tostring(minRR) + ")"
+        else
+            [lot, maxLoss, minLoss, budget] = lotCalc(loss)
+            ok := lot >= 0.01
+            dir = d == 1 ? "BUY" : "SELL"
+            col = d == 1 ? colBull : colBear
+            lotTxt = ok ? "Lot " + str.tostring(lot, "#.##") + " (estimate) | max loss $" + str.tostring(maxLoss, "#.##") : "NO TRADE: 0.01 lot risks $" + str.tostring(minLoss, "#.##") + " > budget $" + str.tostring(budget, "#.###")
+            f = format.mintick
+            p = Plan.new(d, bar_index)
+            p.swLb := label.new(swBar, swExt, "① " + swName + " sweep", style = d == 1 ? label.style_label_up : label.style_label_down, color = color.new(colWatch, 10), textcolor = color.black, size = size.small)
+            p.mssLb := label.new(bar_index, d == 1 ? high : low, "② MSS " + (d == 1 ? "▲" : "▼"), style = d == 1 ? label.style_label_down : label.style_label_up, color = color.new(col, 10), textcolor = color.white, size = size.small)
+            p.fvgBx := box.new(fvg.created - 2, fvg.top, bar_index + expiryBars, fvg.bottom, border_color = color.new(#06B6D4, 40), bgcolor = color.new(#06B6D4, 82), text = "③ FVG entry zone", text_size = size.tiny, text_color = color.new(#06B6D4, 0), text_halign = text.align_left)
+            p.e := line.new(bar_index, entry, bar_index + expiryBars, entry, color = colEntry, width = 3)
+            p.s := line.new(bar_index, stop, bar_index + expiryBars, stop, color = colSL, width = 2)
+            p.t := line.new(bar_index, bestT, bar_index + expiryBars, bestT, color = colTP, width = 2)
+            txt = "④ " + dir + (ok ? "" : " — NO TRADE") + "\nEntry " + str.tostring(entry, f) + "\nSL " + str.tostring(stop, f) + "\nTP " + str.tostring(bestT, f) + " (" + bestName + ")\nRR " + str.tostring(bestRR, "#.##") + " after assumed spread\n" + lotTxt + "\nNews not checked by chart"
+            p.lb := label.new(bar_index + expiryBars, entry, txt, style = label.style_label_left, color = color.new(ok ? col : colOff, 15), textcolor = color.white, size = size.small)
+            array.push(plans, p)
+            if array.size(plans) > keepPlans
+                deletePlan(array.shift(plans))
+            state := dir + (ok ? " SETUP" : " (NO TRADE: lot)")
+            msg := "AYESHA " + dir + " " + syminfo.ticker + " " + timeframe.period + "m\n" + "Why: 1) " + swName + " swept 2) MSS " + (d == 1 ? "up" : "down") + " with displacement 3) FVG entry zone\n" + "Entry " + str.tostring(entry, f) + " | SL " + str.tostring(stop, f) + " | TP " + str.tostring(bestT, f) + " | RR " + str.tostring(bestRR, "#.##") + "\n" + lotTxt + "\nValid " + str.tostring(expiryBars) + " bars. Check news + Exness spread. Open " + syminfo.ticker + " on TradingView to see steps 1-4."
+    [state, msg, ok]
+
+if barstate.isconfirmed
+    if not na(armedBullBar) and bar_index - armedBullBar > mssWithin
+        armedBullBar := na
+    if not na(armedBearBar) and bar_index - armedBearBar > mssWithin
+        armedBearBar := na
+    if bullBreak and not na(armedBullBar)
+        if not bullDisp
+            setupState := "WAIT (break without displacement)"
+        else if not tradeableAtClose()
+            setupState := "WAIT (outside London/NY)"
+        else
+            [st, msg, ok] = buildPlan(1, armedBullBar, armedBullExt, armedBullName)
+            setupState := st
+            if msg != "" and (ok or alertNoTrade)
+                alert(msg, alert.freq_once_per_bar_close)
+        armedBullBar := na
+    if bearBreak and not na(armedBearBar)
+        if not bearDisp
+            setupState := "WAIT (break without displacement)"
+        else if not tradeableAtClose()
+            setupState := "WAIT (outside London/NY)"
+        else
+            [st, msg, ok] = buildPlan(-1, armedBearBar, armedBearExt, armedBearName)
+            setupState := st
+            if msg != "" and (ok or alertNoTrade)
+                alert(msg, alert.freq_once_per_bar_close)
+        armedBearBar := na
+    for p in plans
+        if not na(p.bar) and bar_index - p.bar > expiryBars
+            line.set_color(p.e, colOff)
+            line.set_color(p.s, colOff)
+            line.set_color(p.t, colOff)
+            label.set_color(p.lb, color.new(colOff, 30))
+            p.bar := na
+
+// ---------------------------------------------------------------- HTF bias (confirmed H1 bar only)
+htfTrend() =>
+    var int t = 0
+    var float lastH = na
+    var float lastL = na
+    hph = ta.pivothigh(high, swingL, swingR)
+    hpl = ta.pivotlow(low, swingL, swingR)
+    if not na(lastH) and close > lastH
+        t := 1
+        lastH := na
+    if not na(lastL) and close < lastL
+        t := -1
+        lastL := na
+    if not na(hph)
+        lastH := hph
+    if not na(hpl)
+        lastL := hpl
+    t
+htfConfirmed() =>
+    x = htfTrend()
+    x[1]
+bias = request.security(syminfo.tickerid, "60", htfConfirmed(), lookahead = barmerge.lookahead_on)
+
+// ---------------------------------------------------------------- status table
+var table tb = table.new(position.top_right, 2, 7, bgcolor = color.new(color.black, 35), border_width = 1)
+if barstate.islast
+    sessTxt = londonNow and nyNow ? "LDN+NY" : londonNow ? "LONDON" : nyNow ? "NEW YORK" : tokyoNow ? "TOKYO" : "OFF"
+    table.cell(tb, 0, 0, "PAIR", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 0, syminfo.ticker, text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 1, "SESSION", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 1, sessTxt, text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 2, "HTF BIAS", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 2, bias == 1 ? "BULL ▲" : bias == -1 ? "BEAR ▼" : "NEUTRAL", text_color = bias == 1 ? colBull : bias == -1 ? colBear : color.white, text_size = size.small)
+    table.cell(tb, 0, 3, "SETUP", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 3, setupState, text_color = colWatch, text_size = size.small)
+    table.cell(tb, 0, 4, "RISK", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 4, "LOT = ESTIMATE, check Exness", text_color = colWatch, text_size = size.small)
+    table.cell(tb, 0, 5, "VERSION", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 5, STRATEGY_VERSION + " #" + STRATEGY_HASH, text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 6, "TV FEED", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 6, syminfo.prefix, text_color = color.white, text_size = size.small)

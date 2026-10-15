@@ -1,25 +1,54 @@
-# Aysha-Point
+# AYESHA FX
 
-**AYESHA — AI Forex Trading Assistant** is a planned personal-use forex market analysis project.
+Advisory-only ICT/SMC forex analysis for manual trading on Exness. **It never places,
+modifies or closes orders** and never asks for any login or password. `NO_TRADE` is a
+normal, often correct, output.
 
-**Current status:** Planning and documentation only. Application/indicator development awaits project owner approval.
+- Full spec: [`docs/AYESHA_AI_FOREX_TRADING_ASSISTANT_MASTER_PLAN.md`](docs/AYESHA_AI_FOREX_TRADING_ASSISTANT_MASTER_PLAN.md)
+- Plan review: [`docs/00-plan-review.md`](docs/00-plan-review.md)
+- Roadmap and current phase: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- Windows setup (বাংলা): [`docs/07-setup-windows.md`](docs/07-setup-windows.md)
+- TradingView guide: [`docs/05-tradingview-guide.md`](docs/05-tradingview-guide.md)
+- Risk math: [`docs/03-risk-and-contract-math.md`](docs/03-risk-and-contract-math.md)
 
-## Master specification
+## Quick start (no MT5 needed)
 
-- [A–Z Master Project Specification, Architecture, Rulebook & Mandatory Development Checklist](docs/AYESHA_AI_FOREX_TRADING_ASSISTANT_MASTER_PLAN.md)
+1. Copy [`tradingview/AyeshaSmartMoney.pine`](tradingview/AyeshaSmartMoney.pine) into TradingView's Pine Editor and add it to a 15m chart.
+2. Create an alert on each pair: Condition **AYESHA → Any alert() function call**, **Notify in app**.
+3. The TradingView phone app shows the alert; open that pair to see the numbered reasons on the chart.
 
-## Project scope
+Guide (বাংলা): [`docs/05-tradingview-guide.md`](docs/05-tradingview-guide.md)
 
-- TradingView Pine Script indicator for visual chart analysis (within TradingView's execution limits)
-- Local Windows PC scanner, with no VPS
-- Android 13 companion app and notifications
-- Shared strategy rules and signal validation
-- ICT/SMC price-action analysis, session context, institutional-behavior hypotheses, and disciplined NO TRADE decisions
-- USD equity-based position sizing for a manual-execution Exness Standard account
-- Backtesting, paper/forward testing, data quality checks, and risk controls
+## Optional Python tools (phases 1, 2, 4, 5, 6)
 
-**Important:** This software does not guarantee profitable trades. Orders are placed manually by the user. Keep passwords, broker credentials, and other secrets out of GitHub.
+| Command | What it does | Needs MT5? |
+|---|---|---|
+| `ayesha lot-table --equity 20` | Shows what the 0.01 minimum lot would risk for typical stops | No |
+| `ayesha risk ...` | Sizes one trade idea and runs every hard gate | No |
+| `ayesha spec-check` | Reads real Exness contract specs and spreads, read-only | Yes (Windows) |
+| `ayesha export --symbol EURUSD --tf M15 --days 730 --out eurusd_m15.csv` | Saves closed bars to CSV | Yes (Windows) |
+| `ayesha scan --news data\calendar.csv [--telegram]` | Live advisory scanner, READY alerts, signal registry | Yes (Windows) |
+| `ayesha signals` / `ayesha mark --id ... --placed` | Signal list and manual journal | No |
+| `ayesha backtest --csv eurusd_m15.csv --symbol EURUSD --equity 20 --split 2025-07-01` | Bar-by-bar replay of the SWEEP_MSS_FVG setup, results in R after spread | No |
 
-## Development workflow
+## Layout
 
-The master specification is the planning baseline. Keep subsequent work version-controlled in GitHub with reviewed changes and updated checklists.
+```
+contracts/       strategy-spec.yaml (canonical rules, hashed), signal.schema.json
+desktop/ayesha/  risk/ feed/ (MT5 read-only, CSV) rules/ (primitives, strategy) backtest/ news/ sessions.py cli.py
+desktop/tests/   69 tests: risk gates, DST sessions, primitives, zero-lookahead, fills, scanner, safety
+scripts/         check_no_order_api.py (CI fails on any trading call)
+tradingview/     AyeshaSmartMoney.pine (generated chart helper) + template
+android/         phase 8
+```
+
+## Develop
+
+```bash
+cd desktop
+pip install -e ".[dev]"        # add ",mt5" on Windows
+pytest -q
+python ../scripts/check_no_order_api.py ..
+```
+
+Backtest results are historical simulations, not forecasts. Scores are rule points, not probabilities.

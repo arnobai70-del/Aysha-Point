@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ayesha-fx"
+version = "0.3.0"
+description = "AYESHA FX: advisory-only ICT/SMC forex scanner, risk engine and replay backtester (no order execution)"
+requires-python = ">=3.11"
+dependencies = [
+  "pyyaml>=6.0",
+  "tzdata>=2024.1",   # IANA zones on Windows
+]
+
+[project.optional-dependencies]
+mt5 = ["MetaTrader5>=5.0.45; platform_system == 'Windows'"]
+dev = ["pytest>=8", "hypothesis>=6"]
+
+[project.scripts]
+ayesha = "ayesha.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ayesha*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

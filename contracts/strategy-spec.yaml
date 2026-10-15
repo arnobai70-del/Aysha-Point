@@ -1,0 +1,79 @@
+# AYESHA canonical strategy contract.
+# Python loads this file at runtime; Pine constants are generated from it (phase 6).
+# Any change here changes strategy_hash, which is shown in every signal.
+strategy_version: "0.2.0"
+
+account:
+  broker: Exness
+  account_type: Standard        # Standard | StandardCent | Other
+  currency: USD
+
+risk:
+  risk_per_trade_percent: 0.5   # default; hard cap below
+  max_risk_per_trade_percent: 1.0
+  max_open_risk_percent: 1.0
+  max_daily_loss_percent: 2.0
+  max_losses_per_day: 2
+  max_same_currency_positions: 1  # correlated exposure, e.g. two USD-short trades
+  min_net_rr: 2.0
+  max_spread_pips: 1.5
+  slippage_buffer_pips: 0.3
+  min_stop_atr_fraction: 0.5    # SL tighter than 0.5 * ATR(M15) => NO_TRADE
+  max_quote_age_seconds: 30
+  strict_news: true             # unknown calendar => NO_TRADE
+
+pairs:
+  enabled: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, EURJPY]
+  disabled: [NZDUSD, USDCHF, EURGBP, XAUUSD, USOIL, BTCUSD]
+
+sessions:   # local times in each IANA zone; DST handled by zoneinfo
+  SYDNEY:  {tz: Australia/Sydney,  start: "07:00", end: "16:00"}
+  TOKYO:   {tz: Asia/Tokyo,        start: "09:00", end: "18:00"}
+  LONDON:  {tz: Europe/London,     start: "08:00", end: "17:00"}
+  NEW_YORK: {tz: America/New_York, start: "08:00", end: "17:00"}
+  trade_sessions: [LONDON, NEW_YORK]
+  asia_range: {tz: Asia/Tokyo, start: "09:00", end: "15:00"}
+  rollover: {tz: America/New_York, start: "16:55", end: "17:10"}
+  week_open: {tz: America/New_York, weekday: 6, time: "17:00"}   # Sunday
+  week_close: {tz: America/New_York, weekday: 4, time: "17:00"}  # Friday
+
+rules:
+  atr_period: 14
+  swing_left_bars: 3
+  swing_right_bars: 3
+  bos_buffer_atr: 0.05          # close must exceed swing by this * ATR
+  displacement_body_atr: 1.2    # body >= 1.2 * ATR
+  displacement_body_frac: 0.6   # body / range
+  fvg_min_gap_atr: 0.1
+  fvg_max_age_bars: 40
+  eq_tolerance_atr: 0.1         # equal highs/lows tolerance
+  sweep_min_penetration_atr: 0.05
+  sweep_reclaim_bars: 3
+  mss_within_bars: 12           # MSS must follow the sweep within N bars
+
+entry:
+  setup: SWEEP_MSS_FVG
+  entry_mode: proximal          # proximal | midpoint
+  sl_buffer_atr: 0.1
+  expiry_bars: 8
+  setup_timeframe: M15
+  bias_timeframe: H1
+  require_htf_bias: false       # countertrend allowed only with stricter score
+
+news:
+  block_minutes_before: 30
+  block_minutes_after: 30
+  impacts_blocked: [HIGH]
+
+scoring:
+  a_plus: 85
+  watch: 70
+
+feed:
+  server_utc_offset_hours: 0    # verify with `ayesha spec-check` (server_offset_estimate_hours)
+  warmup_days: 20
+  poll_seconds: 20
+  stale_after_bars: 2           # no new closed bar for 2 bars while market open => DATA_STALE
+
+delivery:
+  notify_grades: [A_PLUS]       # READY alerts only for these grades; WATCH is journal/quiet

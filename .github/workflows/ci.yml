@@ -1,0 +1,27 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  desktop:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Safety scan (no order execution code)
+        run: python scripts/check_no_order_api.py .
+      - name: Install deps for Pine check
+        run: pip install pyyaml tzdata
+      - name: Pine file matches strategy spec
+        run: python scripts/generate_pine.py --check
+      - name: Install
+        working-directory: desktop
+        run: pip install -e ".[dev]"
+      - name: Tests
+        working-directory: desktop
+        run: pytest -q

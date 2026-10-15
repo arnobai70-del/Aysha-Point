@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.hypothesis/
+build/
+dist/
+.env
+*.db
+*.sqlite
+data/
+reports/
+*.keystore
+*.jks
+google-services.json
