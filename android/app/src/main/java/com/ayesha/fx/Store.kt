@@ -15,7 +15,7 @@ class Prefs(context: Context) {
         set(v) = p.edit().putString("equity", v.toString()).apply()
     var riskPercent: Double
         get() = p.getString("risk", "0.5")!!.toDoubleOrNull() ?: 0.5
-        set(v) = p.edit().putString("risk", v.coerceIn(0.1, 1.0).toString()).apply()
+        set(v) = p.edit().putString("risk", v.toString()).apply()
     var accountType: String
         get() = p.getString("account", "Standard")!!
         set(v) = p.edit().putString("account", v).apply()
@@ -92,6 +92,8 @@ class AlertStore(context: Context) {
             .put("rr", a.rr).put("chartLot", a.chartLot).put("expiryBars", a.expiryBars).put("source", a.source)
             .put("targetName", a.targetName).put("version", a.version).put("why", a.why)
             .put("receivedAtMs", a.receivedAtMs).put("raw", a.raw).put("isTest", a.isTest)
+            .put("barCloseMs", a.barCloseMs ?: JSONObject.NULL).put("quoteUsd", a.quoteUsd ?: JSONObject.NULL)
+            .put("status", a.status)
             .put("userStatus", e.userStatus).put("resultUsd", e.resultUsd ?: JSONObject.NULL)
     }
 
@@ -105,6 +107,9 @@ class AlertStore(context: Context) {
                 source = o.optString("source"), targetName = o.optString("targetName"),
                 version = o.optString("version"), why = o.optString("why"),
                 receivedAtMs = o.getLong("receivedAtMs"), raw = o.optString("raw"), isTest = o.optBoolean("isTest"),
+                barCloseMs = if (o.isNull("barCloseMs")) null else o.optLong("barCloseMs"),
+                quoteUsd = if (o.isNull("quoteUsd")) null else o.optDouble("quoteUsd").takeIf { it.isFinite() && it > 0 },
+                status = o.optString("status", AyeshaAlert.CHART_CANDIDATE),
             ),
             userStatus = o.optString("userStatus", "NEW"),
             resultUsd = if (o.isNull("resultUsd")) null else o.optDouble("resultUsd"),

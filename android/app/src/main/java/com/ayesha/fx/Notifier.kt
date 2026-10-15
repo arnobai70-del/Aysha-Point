@@ -12,6 +12,8 @@ import android.graphics.Color
 import android.os.Build
 import com.ayesha.fx.core.AyeshaAlert
 import com.ayesha.fx.core.LotCalc
+import com.ayesha.fx.core.LotResult
+import java.util.Locale
 
 object Notifier {
     private const val CHANNEL = "ayesha_setups"
@@ -32,25 +34,45 @@ object Notifier {
         Build.VERSION.SDK_INT < 33 ||
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
+    /** Lot for this alert from the owner's settings. Never falls back to the chart's own lot estimate. */
+    fun lotFor(context: Context, a: AyeshaAlert): LotResult {
+        val prefs = Prefs(context)
+        return LotCalc.calc(a.ticker, a.entry, a.stop, prefs.equityUsd, prefs.riskPercent, prefs.accountType,
+            prefs.spreadPips, prefs.slippagePips, chartQuoteUsd = a.quoteUsd)
+    }
+
+    /** Short Bangla reason for a non-OK lot status. */
+    fun statusText(r: LotResult): String = when (r.status) {
+        LotCalc.OK -> "Lot ঠিক আছে"
+        LotCalc.NO_TRADE_MIN_LOT -> "NO TRADE: 0.01 লটেও ঝুঁকি বেশি"
+        LotCalc.RISK_UNVERIFIED -> "RISK UNVERIFIED: লট যাচাই করা যায়নি"
+        LotCalc.INVALID_SETTINGS -> "Settings ঠিক নেই"
+        else -> "লেভেল ঠিক নেই"
+    }
+
     fun show(context: Context, a: AyeshaAlert) {
         val prefs = Prefs(context)
-        if (System.currentTimeMillis() < prefs.pausedUntilMs) return
-        val lot = LotCalc.calc(a.ticker, a.entry, a.stop, prefs.equityUsd, prefs.riskPercent, prefs.accountType,
-            prefs.spreadPips, prefs.slippagePips)
-        val tradeable = lot?.ok ?: (a.chartLot >= LotCalc.MIN_LOT)
+        val now = System.currentTimeMillis()
+        if (now < prefs.pausedUntilMs && !a.isTest) return
+        // A push that reaches the phone after the setup expired is stored for the record but never alerted.
+        if (a.isExpired(now) && !a.isTest) return
+        val lot = lotFor(context, a)
+        val tradeable = lot.ok
         if (!tradeable && !prefs.alertNoTrade && !a.isTest) return
         if (!canPost(context)) return
         ensureChannel(context)
 
         val icon = if (a.isBuy) "🟢" else "🔴"
-        val title = "$icon ${a.direction} ${a.ticker}" + (if (tradeable) "" else " · NO TRADE") + (if (a.isTest) " · TEST" else "")
-        val lotLine = when {
-            lot == null -> "Lot (chart): ${a.chartLot}"
-            lot.ok -> "Lot ${"%.2f".format(java.util.Locale.US, lot.lot)} · max loss \$${"%.2f".format(java.util.Locale.US, lot.maxLossUsd)}"
-            else -> lot.note
+        val title = "$icon ${a.direction} ${a.ticker} · " + (if (tradeable) "চার্ট ক্যান্ডিডেট" else lot.status.replace('_', ' ')) +
+            (if (a.isTest) " · TEST" else "")
+        val lotLine = if (lot.ok) {
+            "Lot ${"%.2f".format(Locale.US, lot.lot)} · max loss \$${"%.2f".format(Locale.US, lot.maxLossUsd)}"
+        } else {
+            statusText(lot) + " — " + lot.note
         }
-        val body = "Entry ${a.fmt(a.entry)} · SL ${a.fmt(a.stop)} · TP ${a.fmt(a.target)} · RR ${"%.2f".format(java.util.Locale.US, a.rr)}\n" +
-            "$lotLine\nWhy: ${a.source} sweep → MSS → FVG"
+        val late = if (a.isDelayed) "\n⚠️ নোটিফিকেশন দেরিতে এসেছে (${(a.deliveryDelayMs ?: 0) / 60_000} মিনিট)" else ""
+        val body = "Entry ${a.fmt(a.entry)} · SL ${a.fmt(a.stop)} · TP ${a.fmt(a.target)} · RR ${"%.2f".format(Locale.US, a.rr)}\n" +
+            "$lotLine\nNews আর Exness spread যাচাই হয়নি, নিজে দেখে নিন।$late"
 
         val open = Intent(context, DetailActivity::class.java)
             .putExtra(DetailActivity.EXTRA_ID, a.id)
@@ -67,7 +89,7 @@ object Notifier {
             .setContentIntent(pi)
             .setAutoCancel(true)
             .setCategory(Notification.CATEGORY_MESSAGE)
-            .setWhen(a.receivedAtMs)
+            .setWhen(a.signalTimeMs)
             .setShowWhen(true)
             .build()
         context.getSystemService(NotificationManager::class.java).notify(a.id.hashCode(), n)

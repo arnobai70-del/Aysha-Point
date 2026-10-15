@@ -389,8 +389,10 @@ buildPlan(int d, int swBar, float swExt, string swName) =>
             if array.size(plans) > keepPlans
                 deletePlan(array.shift(plans))
             state := dir + (ok ? " SETUP" : " (NO TRADE: lot)")
-            // line 1 is machine-readable for the AYESHA phone app; keep keys stable (KEY=value, space separated)
-            head = "AYESHA " + dir + " " + syminfo.prefix + ":" + syminfo.ticker + " TF=" + timeframe.period + " E=" + str.tostring(entry, f) + " SL=" + str.tostring(stop, f) + " TP=" + str.tostring(bestT, f) + " RR=" + str.tostring(bestRR, "#.##") + " LOT=" + str.tostring(ok ? lot : 0.0, "#.##") + " EXP=" + str.tostring(expiryBars) + " SRC=" + swName + " TGT=" + bestName + " V=" + STRATEGY_HASH
+            // line 1 is machine-readable for the AYESHA phone app; keep keys stable (KEY=value, space separated).
+            // BAR = close time of the signal bar (UTC ms): the app derives expiry and the dedup id from it, not from
+            // when the phone got the push. ST=CHART_CANDIDATE: news, live spread and broker spec are NOT verified here.
+            head = "AYESHA " + dir + " " + syminfo.prefix + ":" + syminfo.ticker + " TF=" + timeframe.period + " E=" + str.tostring(entry, f) + " SL=" + str.tostring(stop, f) + " TP=" + str.tostring(bestT, f) + " RR=" + str.tostring(bestRR, "#.##") + " LOT=" + str.tostring(ok ? lot : 0.0, "#.##") + " EXP=" + str.tostring(expiryBars) + " SRC=" + swName + " TGT=" + bestName + " BAR=" + str.tostring(time_close, "#") + " QUSD=" + (na(quoteUsd) ? "NA" : str.tostring(quoteUsd, "#.########")) + " ST=CHART_CANDIDATE V=" + STRATEGY_HASH
             msg := head + "\n" + "Why: 1) " + swName + " swept 2) MSS " + (d == 1 ? "up" : "down") + " with displacement 3) FVG entry zone\n" + lotTxt + "\nCheck news + Exness spread. Open " + syminfo.ticker + " on TradingView to see steps 1-4."
     [state, msg, ok]
 

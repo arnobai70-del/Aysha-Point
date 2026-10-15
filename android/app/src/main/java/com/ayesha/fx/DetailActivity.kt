@@ -51,13 +51,30 @@ class DetailActivity : Activity() {
 
         val head = Ui.card(this, if (expired) Ui.OFF else if (a.isBuy) Ui.BULL else Ui.BEAR)
         head.addView(Ui.text(this, (if (a.isBuy) "🟢 " else "🔴 ") + "${a.direction} ${a.ticker}" + (if (a.isTest) " · TEST" else ""), 22f, bold = true))
-        val recv = DateFormat.format("dd MMM yyyy HH:mm", Date(a.receivedAtMs))
+        val sig = DateFormat.format("dd MMM yyyy HH:mm", Date(a.signalTimeMs))
         val exp = DateFormat.format("HH:mm", Date(a.expiresAtMs))
-        head.addView(Ui.text(this, "এসেছে $recv · ${a.timeframe}m চার্ট", 13f, Ui.MUTED))
+        head.addView(Ui.text(this, "চার্টে সিগন্যাল $sig · ${a.timeframe}m চার্ট", 13f, Ui.MUTED))
+        if (a.isDelayed) {
+            head.addView(Ui.text(this, "⚠️ ফোনে এসেছে ${(a.deliveryDelayMs ?: 0) / 60_000} মিনিট দেরিতে। দাম মিলিয়ে নিন।", 13f, Ui.WATCH))
+        }
+        if (!a.hasBarTime) {
+            head.addView(Ui.text(this, "পুরনো indicator: মেয়াদ ফোনে পৌঁছানোর সময় থেকে ধরা হয়েছে। নতুন indicator বসান।", 12f, Ui.WATCH))
+        }
         head.addView(Ui.text(this,
             if (expired) "⌛ মেয়াদ শেষ ($exp)। এখন আর এই entry নেবেন না।" else "⏳ $exp পর্যন্ত বৈধ। দাম entry থেকে অনেক দূরে চলে গেলে পিছনে দৌড়াবেন না।",
             14f, if (expired) Ui.WATCH else Ui.TEXT))
         col.addView(head)
+
+        // What was and was not checked. A chart alert is only a candidate until the owner checks the rest.
+        val gates = Ui.card(this, Ui.WATCH)
+        gates.addView(Ui.text(this, "অবস্থা: CHART CANDIDATE (চার্ট ক্যান্ডিডেট)", 15f, Ui.WATCH, bold = true))
+        gates.addView(Ui.text(this,
+            "✅ চার্টের নিয়ম: sweep → MSS → FVG, RR ≥ ২ (আন্দাজি spread সহ)\n" +
+                "❌ বড় নিউজ যাচাই হয়নি — ForexFactory/Investing calendar দেখুন\n" +
+                "❌ Exness-এর আসল spread যাচাই হয়নি — অ্যাপে spread দেখুন\n" +
+                "❌ Exness-এর contract/লট নিয়ম যাচাই হয়নি — অ্যাপে লট মিলিয়ে নিন\n" +
+                "এই তিনটা ঠিক থাকলে তবেই ট্রেড বিবেচনা করুন।", 13f))
+        col.addView(gates)
 
         val lv = Ui.card(this, Ui.SKY)
         lv.addView(Ui.text(this, "লেভেল (TradingView চার্টের দাম)", 13f, Ui.MUTED))
@@ -69,17 +86,21 @@ class DetailActivity : Activity() {
 
         val risk = Ui.card(this, Ui.WATCH)
         risk.addView(Ui.text(this, "লট (আপনার settings থেকে)", 13f, Ui.MUTED))
-        val r = LotCalc.calc(a.ticker, a.entry, a.stop, prefs.equityUsd, prefs.riskPercent, prefs.accountType,
-            prefs.spreadPips, prefs.slippagePips)
-        if (r == null) {
-            risk.addView(Ui.text(this, "এই পেয়ারের লট ফোনে হিসাব হয় না। চার্টের আন্দাজ: ${a.chartLot}", 15f))
-        } else if (r.ok) {
+        val r = Notifier.lotFor(this, a)
+        if (r.ok) {
             risk.addView(Ui.text(this, "Lot ${f2(r.lot)}  ·  সর্বোচ্চ লস \$${f2(r.maxLossUsd)}", 18f, bold = true))
             risk.addView(Ui.text(this, "Budget \$${f2(r.budgetUsd)} (${prefs.riskPercent}% of \$${prefs.equityUsd}) · SL ${String.format(Locale.US, "%.1f", r.stopPips)} pips", 13f, Ui.MUTED))
-        } else {
+            if (r.rateSource == "CHART") {
+                risk.addView(Ui.text(this, "এই পেয়ারের USD রেট TradingView চার্ট থেকে নেওয়া।", 12f, Ui.MUTED))
+            }
+        } else if (r.status == LotCalc.NO_TRADE_MIN_LOT) {
             risk.addView(Ui.text(this, "⛔ NO TRADE", 20f, Ui.BEAR, bold = true))
             risk.addView(Ui.text(this, "সবচেয়ে ছোট লট 0.01 নিলেও ঝুঁকি \$${f2(r.minLotLossUsd)} (equity-র ${String.format(Locale.US, "%.1f", r.minLotLossPercent)}%), " +
                 "অথচ আপনার সীমা \$${String.format(Locale.US, "%.3f", r.budgetUsd)}।", 14f))
+        } else {
+            // Fail closed: no lot is shown when it cannot be verified (the chart's own estimate is not used).
+            risk.addView(Ui.text(this, "⛔ " + Notifier.statusText(r), 18f, Ui.BEAR, bold = true))
+            risk.addView(Ui.text(this, r.note + "। এই সিগন্যালে ট্রেড নেবেন না, অথবা Exness অ্যাপে নিজে হিসাব করুন।", 14f))
         }
         risk.addView(Ui.text(this, "Exness অ্যাপে আসল spread আর lot মিলিয়ে নিন। বড় নিউজের ৩০ মিনিট আগে-পরে ট্রেড নেবেন না।", 12f, Ui.MUTED))
         col.addView(risk)

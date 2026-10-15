@@ -8,6 +8,7 @@ import android.widget.EditText
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.Toast
+import com.ayesha.fx.core.SettingsCheck
 
 /** Capital & risk settings (spec O6). Risk is capped at 1% per trade. */
 class SettingsActivity : Activity() {
@@ -49,10 +50,19 @@ class SettingsActivity : Activity() {
         col.addView(noTrade)
 
         col.addView(Ui.button(this, "💾 Save", Ui.BULL) {
-            p.equityUsd = equity.text.toString().toDoubleOrNull() ?: p.equityUsd
-            p.riskPercent = risk.text.toString().toDoubleOrNull() ?: p.riskPercent
-            p.spreadPips = spread.text.toString().toDoubleOrNull() ?: p.spreadPips
-            p.slippagePips = slip.text.toString().toDoubleOrNull() ?: p.slippagePips
+            val eq = equity.text.toString().trim().toDoubleOrNull() ?: Double.NaN
+            val rk = risk.text.toString().trim().toDoubleOrNull() ?: Double.NaN
+            val sp = spread.text.toString().trim().toDoubleOrNull() ?: Double.NaN
+            val sl = slip.text.toString().trim().toDoubleOrNull() ?: Double.NaN
+            val bad = SettingsCheck.problems(eq, rk, sp, sl)
+            if (bad.isNotEmpty()) {
+                Toast.makeText(this, bad.joinToString("\n"), Toast.LENGTH_LONG).show()
+                return@button
+            }
+            p.equityUsd = eq
+            p.riskPercent = rk
+            p.spreadPips = sp
+            p.slippagePips = sl
             p.accountType = if (group.checkedRadioButtonId == 102) "StandardCent" else "Standard"
             p.alertNoTrade = noTrade.isChecked
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()

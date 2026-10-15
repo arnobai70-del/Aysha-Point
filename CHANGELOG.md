@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 — 2026-10-15 (audit P0 fixes)
+- Phone app 0.2.0: lot sizing fails closed (RISK_UNVERIFIED for unknown instruments, missing USD rate or bad settings); the chart's lot is never used as a fallback. Settings are validated before saving.
+- Every alert is labelled CHART_CANDIDATE with the unverified checks (news, live spread, broker spec) listed in the app.
+- Indicator alert line adds `BAR=` (signal bar close, UTC ms), `QUSD=` (quote→USD rate for crosses) and `ST=CHART_CANDIDATE`. The app takes expiry and the dedup id from `BAR`, flags late pushes and never notifies an already-expired setup.
+- New docs: STATUS, DECISIONS, VERIFICATION.
+
 ## 0.4.0 — 2026-10-15 (TradingView-first)
 - Indicator fires `alert()` on each SWEEP → MSS → FVG setup with pair, reasons, entry/SL/TP, RR and lot estimate, for TradingView phone notifications. MT5 no longer needed for daily use.
 - Chart draws numbered reasons: ① sweep, ② MSS, ③ FVG entry zone, ④ entry/SL/TP + lot label; keeps last N setups, greys out expired ones.

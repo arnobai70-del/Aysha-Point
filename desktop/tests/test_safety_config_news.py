@@ -128,3 +128,12 @@ def test_pine_generated_from_current_spec():
     assert pine.startswith("//@version=6")
     assert "alert(msg, alert.freq_once_per_bar_close)" in pine and "It never places orders" in pine
     assert load_spec()["strategy_hash"] in pine
+
+
+def test_pine_alert_payload_matches_phone_parser():
+    # Keys the Android AlertParser relies on (android/.../core/AyeshaAlert.kt). BAR drives expiry and dedup.
+    pine = (ROOT / "tradingview" / "AyeshaSmartMoney.pine").read_text(encoding="utf-8")
+    head = next(line for line in pine.splitlines() if 'head = "AYESHA "' in line)
+    for key in ("TF=", "E=", "SL=", "TP=", "RR=", "LOT=", "EXP=", "SRC=", "TGT=", "BAR=", "QUSD=", "ST=CHART_CANDIDATE", "V="):
+        assert f" {key}" in head, key
+    assert 'str.tostring(time_close, "#")' in head

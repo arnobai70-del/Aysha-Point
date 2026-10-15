@@ -10,6 +10,7 @@ import android.text.format.DateFormat
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.ayesha.fx.core.AlertParser
+import com.ayesha.fx.core.SettingsCheck
 import java.util.Date
 
 /** Home: setup status + alert inbox. */
@@ -44,6 +45,10 @@ class MainActivity : Activity() {
         status.addView(Ui.text(this, (if (listener) "✅" else "⚠️") + " TradingView নোটিফিকেশন পড়ার অনুমতি", 15f))
         status.addView(Ui.text(this, (if (notif) "✅" else "⚠️") + " AYESHA নোটিফিকেশন দেখানোর অনুমতি", 15f))
         status.addView(Ui.text(this, "Equity \$${prefs.equityUsd} · risk ${prefs.riskPercent}% · ${prefs.accountType}", 13f, Ui.MUTED))
+        val bad = SettingsCheck.problems(prefs.equityUsd, prefs.riskPercent, prefs.spreadPips, prefs.slippagePips)
+        if (bad.isNotEmpty()) {
+            status.addView(Ui.text(this, "⚠️ Settings ঠিক নেই, তাই কোনো লট দেখানো হবে না: " + bad.joinToString("; "), 14f, Ui.WATCH, bold = true))
+        }
         if (System.currentTimeMillis() < prefs.pausedUntilMs) {
             status.addView(Ui.text(this, "⏸ অ্যালার্ট বন্ধ আছে", 14f, Ui.WATCH, bold = true))
         }
@@ -65,7 +70,8 @@ class MainActivity : Activity() {
         col.addView(Ui.row(this,
             Ui.button(this, "⚙️ Settings") { startActivity(Intent(this, SettingsActivity::class.java)) },
             Ui.button(this, "🧪 Test alert", Ui.OFF) {
-                AlertListener.handle(this, AlertParser.SAMPLE, System.currentTimeMillis(), isTest = true)
+                val now = System.currentTimeMillis()
+                AlertListener.handle(this, AlertParser.sample(now), now, isTest = true)
                 Toast.makeText(this, "Test alert পাঠানো হয়েছে", Toast.LENGTH_SHORT).show()
                 render()
             },
@@ -91,7 +97,10 @@ class MainActivity : Activity() {
             val icon = if (a.isBuy) "🟢" else "🔴"
             card.addView(Ui.text(this, "$icon ${a.direction} ${a.ticker}" + (if (a.isTest) "  · TEST" else ""), 17f, bold = true))
             card.addView(Ui.text(this, "Entry ${a.fmt(a.entry)} · SL ${a.fmt(a.stop)} · TP ${a.fmt(a.target)}", 14f))
-            val time = DateFormat.format("dd MMM HH:mm", Date(a.receivedAtMs))
+            val lot = Notifier.lotFor(this, a)
+            card.addView(Ui.text(this, if (lot.ok) "চার্ট ক্যান্ডিডেট · Lot ${String.format(java.util.Locale.US, "%.2f", lot.lot)}" else Notifier.statusText(lot),
+                13f, if (lot.ok) Ui.SKY else Ui.WATCH))
+            val time = DateFormat.format("dd MMM HH:mm", Date(a.signalTimeMs))
             val state = when {
                 e.userStatus == "TAKEN" -> "ট্রেড নিয়েছি"
                 e.userStatus == "SKIPPED" -> "বাদ দিয়েছি"
