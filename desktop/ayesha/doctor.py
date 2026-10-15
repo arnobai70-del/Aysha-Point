@@ -20,7 +20,7 @@ def run_doctor(*, account_type: str = "Standard", oanda_env: str = "practice", p
                make_feed: Callable[..., Any] | None = None, make_calendar: Callable[[Path], Any] | None = None,
                make_notifier: Callable[[str], Any] | None = None,
                clock: Callable[[], datetime] | None = None, store=True) -> list[Row]:
-    from ayesha.broker import load_confirmed
+    from ayesha.broker import confirmed_symbols, load_leverage
     from ayesha.config import load_spec
     from ayesha.delivery.push import normalize_code, topic_for
 
@@ -68,9 +68,33 @@ def run_doctor(*, account_type: str = "Standard", oanda_env: str = "practice", p
 
             rows.append((False, "OANDA prices", redact(f"{type(e).__name__}: {str(e)[:160]}", token)))
 
-    conf = load_confirmed(account_type, home / "broker-confirmed.json")
-    rows.append((conf is not None, "Exness contract", "owner-confirmed" if conf else
-                 "NOT confirmed: run `ayesha confirm-broker` (READY stays blocked: CONTRACT_SPEC_UNVERIFIED)"))
+    bfile = home / "broker-confirmed.json"
+    pairs = [x.upper() for x in spec["pairs"]["enabled"]]
+    done = set(confirmed_symbols(account_type, bfile))
+    missing = [x for x in pairs if x not in done]
+    lev = load_leverage(account_type, bfile)
+    if not missing and lev is not None:
+        rows.append((True, "Exness contract", f"owner-confirmed for {len(pairs)} pairs, leverage "
+                     f"{'unlimited' if lev == 'UNLIMITED' else f'1:{lev:g}'}"))
+    else:
+        what = (f"not confirmed for {', '.join(missing)}" if missing else "") + \
+            ("; " if missing and lev is None else "") + ("leverage not confirmed" if lev is None else "")
+        rows.append((False, "Exness contract", f"{what}: run `ayesha confirm-broker` "
+                     "(those pairs stay blocked: BROKER_SPEC_UNVERIFIED)"))
+
+    from ayesha.capital import CapitalBook, CapitalError, check
+
+    try:
+        snap = CapitalBook(home / "capital.json").latest()
+        c = check(snap, clock(), spec.get("capital", {}), account_type)
+        if snap is None:
+            rows.append((False, "Capital", "no Exness equity entered: run `ayesha capital` (READY blocked: "
+                         "CAPITAL_UNVERIFIED)"))
+        else:
+            rows.append((c.ok, "Capital", f"v{snap.version} owner-entered {c.age_hours:.1f} h ago, "
+                         + ("OK" if c.ok else f"{', '.join(c.blockers)}: run `ayesha capital`")))
+    except CapitalError as e:
+        rows.append((False, "Capital", f"{e}"))
 
     code_file = home / "pairing-code.txt"
     code = None

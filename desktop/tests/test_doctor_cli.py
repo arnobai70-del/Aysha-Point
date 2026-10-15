@@ -38,7 +38,8 @@ def _names(rows, ok):
 def test_doctor_reports_every_missing_piece(tmp_path):
     rows = run_doctor(env={}, home=tmp_path, make_calendar=lambda p: None, publish=True, clock=lambda: NOW, store=False)
     bad = _names(rows, False)
-    assert {"OANDA token", "Exness contract", "Pairing code", "News calendar"} <= bad
+    assert {"OANDA token", "Exness contract", "Capital", "Pairing code", "News calendar"} <= bad
+    assert any("CAPITAL_UNVERIFIED" in d for _, n, d in rows if n == "Capital")
     assert "OANDA prices" not in _names(rows, True)
 
 
@@ -46,15 +47,32 @@ def test_doctor_all_green_with_fakes(tmp_path):
     from ayesha.broker import save_confirmed, load_assumed
     from ayesha.delivery.push import new_pairing_code
 
-    save_confirmed("Standard", {k: float(v) for k, v in load_assumed("Standard").items()
-                                if k in __import__("ayesha.broker", fromlist=["FIELDS"]).FIELDS},
-                   tmp_path / "broker-confirmed.json")
+    from ayesha.broker import FIELDS, save_leverage
+    from ayesha.capital import CapitalBook
+    from ayesha.config import load_spec
+
+    bfile = tmp_path / "broker-confirmed.json"
+    vals = {k: float(v) for k, v in load_assumed("Standard").items() if k in FIELDS}
+    save_confirmed("Standard", vals, bfile)
+    save_leverage("Standard", 2000, bfile)
     (tmp_path / "pairing-code.txt").write_text(new_pairing_code(), encoding="utf-8")
+    CapitalBook(tmp_path / "capital.json", clock=lambda: NOW - timedelta(hours=2)).record(25, positions=[])
+    partial = run_doctor(env={}, home=tmp_path, make_calendar=lambda p: None, publish=False, clock=lambda: NOW,
+                         store=False)
+    contract = next(d for o, n, d in partial if n == "Exness contract" and not o)
+    assert "GBPUSD" in contract and "BROKER_SPEC_UNVERIFIED" in contract  # EURUSD alone confirms nothing else
+    for sym in load_spec()["pairs"]["enabled"]:
+        save_confirmed("Standard", vals, bfile, symbol=sym)
     cal = NewsCalendar([], NOW - timedelta(days=1), NOW + timedelta(days=3))
     rows = run_doctor(env={"AYESHA_OANDA_TOKEN": "x" * 20}, home=tmp_path, make_feed=_Feed,
                       make_calendar=lambda p: cal, make_notifier=_Notifier, clock=lambda: NOW, store=False)
     assert all(ok for ok, _, _ in rows), rows
     assert _Notifier.sent and _Notifier.sent[-1][1] == "TEST"
+    assert not any("25" in d for n, _, d in [(n, o, d) for o, n, d in rows] if n == "Capital"), \
+        "doctor does not print the equity amount"
+    stale = run_doctor(env={}, home=tmp_path, make_calendar=lambda p: None, publish=False,
+                       clock=lambda: NOW + timedelta(hours=30), store=False)
+    assert any(n == "Capital" and not o and "CAPITAL_STALE" in d for o, n, d in stale)
     assert not any("x" * 20 in d for _, _, d in rows), "token value must never be printed"
 
 
@@ -191,11 +209,19 @@ def test_scan_exit_codes_for_the_start_script(monkeypatch, capsys, tmp_path):
 
     from ayesha import credentials as c
 
+    from ayesha.capital import CapitalBook
+
     monkeypatch.setenv("AYESHA_HOME", str(tmp_path))
     monkeypatch.delenv(c.TOKEN_ENV, raising=False)
     monkeypatch.setattr(c, "default_store", lambda: None)
-    assert cli.main(["scan", "--feed", "oanda", "--equity", "25"]) == cli.EXIT_CONFIG  # no token
-    assert cli.main(["scan", "--feed", "oanda"]) == cli.EXIT_CONFIG  # no equity
+    assert cli.main(["scan", "--feed", "oanda"]) == cli.EXIT_CONFIG  # no capital snapshot yet
+    assert "no capital snapshot" in capsys.readouterr().out
+    CapitalBook(tmp_path / "capital.json").record(25, positions=[])
+    assert cli.main(["scan", "--feed", "oanda"]) == cli.EXIT_CONFIG  # no token
+    (tmp_path / "capital.json").write_text("abc", encoding="utf-8")
+    assert cli.main(["scan", "--feed", "oanda"]) == cli.EXIT_CONFIG  # corrupt capital file
+    (tmp_path / "capital.json").unlink()
+    CapitalBook(tmp_path / "capital.json").record(25, positions=[])
     monkeypatch.setenv(c.TOKEN_ENV, TOK)
 
     def http401(url, headers):
@@ -207,9 +233,9 @@ def test_scan_exit_codes_for_the_start_script(monkeypatch, capsys, tmp_path):
     import ayesha.feed.oanda_feed as of
 
     monkeypatch.setattr(of, "_default_get", http401)
-    assert cli.main(["scan", "--feed", "oanda", "--equity", "25"]) == cli.EXIT_AUTH
+    assert cli.main(["scan", "--feed", "oanda"]) == cli.EXIT_AUTH
     monkeypatch.setattr(of, "_default_get", offline)
-    assert cli.main(["scan", "--feed", "oanda", "--equity", "25"]) == cli.EXIT_NETWORK
+    assert cli.main(["scan", "--feed", "oanda"]) == cli.EXIT_NETWORK
     out = capsys.readouterr().out
     assert TOK not in out and "will retry" in out
 
@@ -218,7 +244,9 @@ def test_setup_runs_unattended_and_is_rerunnable(monkeypatch, tmp_path, capsys):
     import io
 
     from ayesha import credentials as c
-    from ayesha.broker import load_confirmed
+    from ayesha.broker import confirmed_symbols, load_confirmed, load_leverage
+    from ayesha.capital import CapitalBook
+    from ayesha.config import load_spec
 
     st = MemStore()
     monkeypatch.setenv("AYESHA_HOME", str(tmp_path))
@@ -230,22 +258,32 @@ def test_setup_runs_unattended_and_is_rerunnable(monkeypatch, tmp_path, capsys):
         def isatty(self):
             return False
 
-    # token, equity, 4 contract values
-    monkeypatch.setattr("sys.stdin", In(f"{TOK}\n25\n100000\n0.01\n0.01\n200\n"))
+    # token, equity, open trades (none), leverage, EURUSD 4 contract values + spread, then the other
+    # five pairs: "same values, I checked" + spread
+    monkeypatch.setattr("sys.stdin", In(f"{TOK}\n25\n\n2000\n100000\n0.01\n0.01\n200\n\n" + "Y\n\n" * 5))
     assert cli.main(["setup", "--no-publish"]) == 0
     assert st.v[c.TOKEN_ENV] == TOK
-    assert (tmp_path / "equity.txt").read_text().strip() == "25"
-    assert load_confirmed("Standard", tmp_path / "broker-confirmed.json")["volume_min"] == 0.01
+    assert not (tmp_path / "equity.txt").exists()
+    book = CapitalBook(tmp_path / "capital.json")
+    first = book.latest()
+    assert (first.equity, first.reason, first.open_positions, first.source) == (25, "INITIAL", (), "OWNER_ENTERED")
+    bfile = tmp_path / "broker-confirmed.json"
+    assert confirmed_symbols("Standard", bfile) == sorted(load_spec()["pairs"]["enabled"])
+    assert load_confirmed("Standard", bfile, "GBPUSD")["volume_min"] == 0.01
+    assert load_leverage("Standard", bfile) == 2000
     assert (tmp_path / "pairing-code.txt").exists()
     code = (tmp_path / "pairing-code.txt").read_text()
-    # second run: Enter keeps everything; a bad equity is refused, then a good one accepted
-    monkeypatch.setattr("sys.stdin", In("\nabc\n30\n\n"))
+    # second run: Enter keeps the token; a bad equity is refused, then 30 accepted as a deposit;
+    # no open trades; contract values already confirmed (Enter = keep)
+    monkeypatch.setattr("sys.stdin", In("\nabc\n30\nD\n\n\n"))
     assert cli.main(["setup", "--no-publish"]) == 0
     assert st.v[c.TOKEN_ENV] == TOK
-    assert (tmp_path / "equity.txt").read_text().strip() == "30"
+    last = book.latest()
+    assert (last.version, last.equity, last.reason, last.amount, last.previous_equity) == (2, 30, "DEPOSIT", 5, 25)
+    assert book.cash_flows_usd() == 5  # the deposit is a cash flow, not trading profit
     assert (tmp_path / "pairing-code.txt").read_text() == code
     out = capsys.readouterr().out
-    assert TOK not in out and "Please type a positive number" in out
+    assert TOK not in out and "Please type a positive number" in out and "Capital confirmed: 30" in out
     monkeypatch.delenv(c.TOKEN_ENV, raising=False)
 
 

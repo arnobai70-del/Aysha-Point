@@ -29,14 +29,21 @@ function Expect([string]$name, $r, [int]$code, [string[]]$texts) {
 Expect "start before install" (Run "start-ayesha.bat" "" "") 1 @("Run install.bat first")
 Expect "local backtest before install" (Run "backtest-local.bat" "" "") 1 @("Run install.bat first")
 
-# token, equity, 4 Exness contract values, Startup? N
-$answers = "$tok`r`n25`r`n100000`r`n0.01`r`n0.01`r`n200`r`nN`r`n"
-Expect "first install" (Run "install.bat" "--no-publish" $answers) 0 @("Token saved", "Saved equity 25 USD", "Pairing code:", "Setup finished")
+# token, Exness equity, open trades (none), leverage, EURUSD contract (4 values) + spread,
+# five more pairs "same values, I checked" + spread, Startup? N
+$lines = @($tok, "25", "", "2000", "100000", "0.01", "0.01", "200", "")
+for ($i = 0; $i -lt 5; $i++) { $lines += @("Y", "") }
+$lines += "N"
+$answers = ($lines -join "`r`n") + "`r`n"
+Expect "first install" (Run "install.bat" "--no-publish" $answers) 0 @("Token saved", "Capital confirmed: 25 USD", "Saved owner-confirmed spec for EURUSD, GBPUSD", "Pairing code:", "Setup finished")
 $reg = (Get-ItemProperty HKCU:\Environment -ErrorAction SilentlyContinue).AYESHA_OANDA_TOKEN
 if ($reg -ne $tok) { Write-Host "FAIL: token not in HKCU\Environment"; $script:failed++ } else { Write-Host "PASS: token stored in the user environment" }
 if (-not (Test-Path (Join-Path $env:AYESHA_HOME "python-path.txt"))) { Write-Host "FAIL: python-path.txt"; $script:failed++ }
 
-Expect "re-run install keeps values" (Run "install.bat" "--no-publish" "`r`n`r`n`r`nN`r`n") 0 @("Kept the current token", "Saved equity 25 USD")
+# token Enter (keep), equity Enter (unchanged), open trades Enter (none), contract Enter (keep), Startup? N
+Expect "re-run install keeps values" (Run "install.bat" "--no-publish" "`r`n`r`n`r`n`r`nN`r`n") 0 @("Kept the current token", "Capital confirmed: 25 USD", "Already confirmed for 6 pairs")
+if (-not (Test-Path (Join-Path $env:AYESHA_HOME "capital.json"))) { Write-Host "FAIL: capital.json"; $script:failed++ }
+if (Test-Path (Join-Path $env:AYESHA_HOME "equity.txt")) { Write-Host "FAIL: legacy equity.txt written"; $script:failed++ }
 
 Expect "rejected token stops the restart loop" (Run "start-ayesha.bat" "3" "") 3 @("TOKEN REJECTED", "OANDA REJECTED THE TOKEN")
 
@@ -44,10 +51,13 @@ $env:HTTPS_PROXY = "http://127.0.0.1:9"
 Expect "network down: restarts, then gives up when capped" (Run "start-ayesha.bat" "2" "") 4 @("will retry", "Restart 1", "Restart 2", "Gave up after 2 restarts")
 Remove-Item Env:HTTPS_PROXY
 
-$eq = Join-Path $env:AYESHA_HOME "equity.txt"
-Set-Content $eq "abc"
-Expect "corrupt equity file is a config error" (Run "start-ayesha.bat" "2" "") 2 @("CONFIG PROBLEM")
-Set-Content $eq "25"
+$cap = Join-Path $env:AYESHA_HOME "capital.json"
+$capSaved = [IO.File]::ReadAllText($cap)
+[IO.File]::WriteAllText($cap, "abc")
+Expect "corrupt capital file is a config error" (Run "start-ayesha.bat" "2" "") 2 @("capital file unreadable", "CONFIG PROBLEM")
+Remove-Item $cap
+Expect "missing capital file means not set up" (Run "start-ayesha.bat" "2" "") 1 @("Run install.bat first")
+[IO.File]::WriteAllText($cap, $capSaved)
 
 Expect "local backtest rejects a pair outside the allowlist" (Run "backtest-local.bat" "--pairs XAUUSD" "") 2 @("INVALID INPUT")
 Expect "local backtest rejects bad days" (Run "backtest-local.bat" "--days 5" "") 2 @("INVALID INPUT")

@@ -109,7 +109,8 @@ def _make_feed(a, spec):  # pragma: no cover - needs MT5 terminal or an OANDA to
     if a.feed == "oanda":
         from ayesha.feed.oanda_feed import OandaFeed
 
-        return OandaFeed(equity_usd=a.equity or 0, account_type=a.account_type, environment=a.oanda_env)
+        return OandaFeed(equity_usd=getattr(a, "equity", None) or None, account_type=a.account_type,
+                         environment=a.oanda_env)
     from ayesha.feed.mt5_feed import MT5ReadOnlyFeed
 
     return MT5ReadOnlyFeed(server_utc_offset_hours=spec["feed"]["server_utc_offset_hours"])
@@ -282,6 +283,110 @@ def _ask(prompt: str) -> str:
         return ""
 
 
+def _parse_positions(raw: str):
+    from ayesha.capital import validate_position
+
+    out = []
+    for part in [x.strip() for x in raw.split(",") if x.strip()]:
+        bits = part.split()
+        if len(bits) not in (2, 3):
+            raise ValueError(f"write each trade as PAIR SIDE [risk USD], e.g. EURUSD BUY 0.50 (got {part!r})")
+        out.append(validate_position(*bits))
+    return out
+
+
+def _capital_prompt(book, account_type: str) -> int:
+    """Ask for the current Exness equity and open trades. Enter keeps the equity (a confirmation)."""
+    from ayesha.capital import CURRENCY, CapitalError, validate_amount
+
+    try:
+        cur = book.latest()
+    except CapitalError as e:
+        print(f"{e}. Starting a new capital history.")
+        book.path.rename(book.path.with_suffix(".corrupt.json"))
+        cur = None
+    unit = CURRENCY[account_type]
+    if cur is not None and cur.account_type != account_type:
+        cur = None
+    while True:
+        hint = f" (Enter = unchanged {cur.equity:g} {unit})" if cur else ""
+        raw = _ask(f"Equity shown in Exness now, in {unit}{hint}: ")
+        try:
+            eq = cur.equity if (cur and not raw) else validate_amount(raw)
+            break
+        except Exception:
+            print("Please type a positive number with at most 2 decimals, e.g. 25 or 25.40.")
+    reason, amount = ("CONFIRM" if cur and eq == cur.equity else "UPDATE"), 0.0
+    if cur and eq != cur.equity:
+        k = _ask("Was the change a deposit or withdrawal? D = deposit, W = withdrawal, Enter = trading result: ").upper()
+        if k in ("D", "W"):
+            reason, amount = ("DEPOSIT", eq - cur.equity) if k == "D" else ("WITHDRAWAL", cur.equity - eq)
+            amount = abs(round(amount, 2)) or 0.01
+    while True:
+        raw = _ask('Open trades in Exness right now? Enter = none, or e.g. "EURUSD BUY 0.50, GBPUSD SELL": ')
+        try:
+            positions = _parse_positions(raw)
+            break
+        except (ValueError, CapitalError) as e:
+            print(f"Not understood: {e}")
+    fm = None
+    while positions and fm is None:
+        try:
+            fm = validate_amount(_ask(f"Free margin shown in Exness, in {unit}: "), "free margin")
+        except Exception:
+            print("Please type the free margin as a number.")
+    try:
+        snap = book.record(eq, account_type, reason, amount, positions, fm)
+    except CapitalError as e:
+        print(f"Not saved: {e}")
+        return EXIT_CONFIG
+    print(f"Capital confirmed: {snap.equity:g} {unit} (v{snap.version}, {snap.reason.lower()}, owner-entered, "
+          f"{len(snap.open_positions)} open trade(s)). Valid for READY sizing for "
+          f"{'4' if reason in ('DEPOSIT', 'WITHDRAWAL') else '24'} h; update it with `ayesha capital`.")
+    return 0
+
+
+def cmd_capital(a) -> int:
+    """Update or show the owner's Exness capital snapshot (the only capital AYESHA sizes from)."""
+    from ayesha.capital import CapitalBook, CapitalError, check
+
+    book = CapitalBook(Path(a.file) if a.file else None)
+    if a.show:
+        try:
+            snap = book.latest()
+        except CapitalError as e:
+            print(f"CONFIG ERROR: {e}")
+            return EXIT_CONFIG
+        c = check(snap, datetime.now(timezone.utc), load_spec(a.spec).get("capital", {}), a.account_type)
+        if snap is None:
+            print("No capital snapshot yet: run `ayesha capital`.")
+            return EXIT_CONFIG
+        print(f"v{snap.version} {snap.equity:g} {snap.currency} entered {snap.entered_at:%Y-%m-%d %H:%M} UTC "
+              f"({snap.reason}); open trades {len(snap.open_positions)}; status {c.label}")
+        return 0 if c.ok else 1
+    if a.session_start:
+        interactive = sys.stdin.isatty() and not os.environ.get("AYESHA_NONINTERACTIVE")
+        if not interactive:
+            return 0
+        print("\n=== Capital check for this session (Exness app -> Accounts) ===")
+        return _capital_prompt(book, a.account_type)
+    if a.equity is None:
+        return _capital_prompt(book, a.account_type)
+    reason = "DEPOSIT" if a.deposit else "WITHDRAWAL" if a.withdrawal else ("CONFIRM" if a.confirm else "UPDATE")
+    try:
+        positions = [] if a.no_positions or not a.positions else _parse_positions(a.positions)
+        snap = book.record(a.equity, a.account_type, reason, a.deposit or a.withdrawal or 0, positions,
+                           a.free_margin, positions_confirmed=bool(a.no_positions or a.positions))
+    except (CapitalError, ValueError) as e:
+        print(f"CONFIG ERROR: {e}")
+        return EXIT_CONFIG
+    print(f"Capital v{snap.version}: {snap.equity:g} {snap.currency} ({snap.reason}) at {snap.entered_at:%Y-%m-%d %H:%M} UTC")
+    if snap.positions_confirmed_at != snap.entered_at:
+        print("Open trades not confirmed (use --no-positions or --positions): READY stays blocked "
+              "(POSITION_STATE_UNVERIFIED) until you confirm them.")
+    return 0
+
+
 def cmd_setup(a) -> int:
     """Interactive one-time setup used by install.bat. Safe to run again: Enter keeps each value."""
     import shutil
@@ -307,25 +412,20 @@ def cmd_setup(a) -> int:
         except (ValueError, RuntimeError) as e:
             print(f"Not saved: {e}")
 
-    print("\n=== 2/5 Your Exness equity in USD ===")
-    eq_file = h / "equity.txt"
-    cur = eq_file.read_text(encoding="utf-8").strip() if eq_file.exists() else ""
-    while True:
-        raw = _ask(f"Equity, e.g. 25 (Enter = keep {cur}): " if cur else "Equity, e.g. 25: ") or cur
-        try:
-            v = float(raw)
-            if not 0 < v < 10_000_000:
-                raise ValueError
-            eq_file.write_text(f"{v:g}\n", encoding="utf-8")
-            print(f"Saved equity {v:g} USD.")
-            break
-        except ValueError:
-            print("Please type a positive number.")
-            if not raw or raw == cur:
-                cur = ""
+    print("\n=== 2/5 Your Exness capital (Exness app -> Accounts) ===")
+    from ayesha.capital import CapitalBook
 
-    print("\n=== 3/5 Exness contract (Exness app: EURUSD -> Specification) ===")
-    if load_confirmed(a.account_type) is None or _ask("Already confirmed. Type Y to enter the values again: ").upper() == "Y":
+    _capital_prompt(CapitalBook(), a.account_type)
+
+    print("\n=== 3/5 Exness contract per pair (Exness app: pair -> Specification) ===")
+    from ayesha.broker import confirmed_symbols, load_leverage
+
+    spec = load_spec(a.spec)
+    pairs = [x.upper() for x in spec["pairs"]["enabled"]]
+    done = confirmed_symbols(a.account_type)
+    if set(pairs) - set(done) or load_leverage(a.account_type) is None or \
+            _ask(f"Already confirmed for {len(done)} pairs. Type Y to enter the values again: ").upper() == "Y":
+        a.symbols = ",".join(pairs)
         cmd_confirm_broker(a)
 
     print("\n=== 4/5 Phone pairing ===")
@@ -439,10 +539,21 @@ def cmd_scan(a) -> int:  # pragma: no cover - needs a live data feed
     from ayesha.scanner import Scanner
     from ayesha.storage.db import Registry
 
+    from ayesha.capital import CapitalBook, CapitalError, check
+
     spec = load_spec(a.spec)
-    if a.feed == "oanda" and not (a.equity and a.equity > 0):
-        print("CONFIG ERROR: --equity (your Exness equity in USD) is required with --feed oanda")
+    book = CapitalBook()
+    try:
+        snap = book.latest()
+    except CapitalError as e:
+        print(f"CONFIG ERROR: {e}")
         return EXIT_CONFIG
+    if snap is None:
+        print("CONFIG ERROR: no capital snapshot. Run install.bat (or `ayesha capital`) and type your Exness equity.")
+        return EXIT_CONFIG
+    c = check(snap, datetime.now(timezone.utc), spec.get("capital", {}), a.account_type)
+    if not c.ok:
+        print(f"WARNING: capital {c.label} ({', '.join(c.blockers)}): READY stays blocked until `ayesha capital`.")
     rc, feed, acct = _connect(a, spec)
     if rc:
         return rc
@@ -465,18 +576,21 @@ def cmd_scan(a) -> int:  # pragma: no cover - needs a live data feed
     elif a.news_ff:
         from ayesha.news.ff_feed import FFCalendarSource
 
-        src = FFCalendarSource(Path(_db_path(a)).parent / "ff_calendar.json")
-        cal = src.calendar(**news_kw)
-        if cal is None:
-            print(f"WARNING: Forex Factory calendar unavailable ({src.last_error}). Signals => NEWS_UNVERIFIED.")
+        cal = FFCalendarSource(Path(_db_path(a)).parent / "ff_calendar.json")  # refreshed by the scanner every poll
+        if cal.calendar(**news_kw) is None:
+            print(f"WARNING: Forex Factory calendar unavailable ({cal.last_error}). Signals => NEWS_UNVERIFIED "
+                  "until it recovers.")
     elif spec["risk"]["strict_news"]:
         print("WARNING: no --news / --news-ff calendar. Strict mode => every candidate is NO_TRADE: NEWS_UNVERIFIED.")
     if a.feed == "oanda":
-        from ayesha.broker import load_confirmed
+        from ayesha.broker import confirmed_symbols
 
-        if load_confirmed(a.account_type) is None:
-            print("WARNING: Exness contract not confirmed (`ayesha confirm-broker`). Signals => CONTRACT_SPEC_UNVERIFIED.")
-    sc = Scanner(feed, spec, Registry(_db_path(a)), notifiers, cal)
+        missing = sorted(set(x.upper() for x in spec["pairs"]["enabled"]) - set(confirmed_symbols(a.account_type)))
+        if missing:
+            print(f"WARNING: Exness contract not confirmed for {', '.join(missing)} (`ayesha confirm-broker`). "
+                  "Those pairs => BROKER_SPEC_UNVERIFIED.")
+    spec = dict(spec, account=dict(spec.get("account", {}), account_type=a.account_type))
+    sc = Scanner(feed, spec, Registry(_db_path(a)), notifiers, cal, capital=book)
     try:
         sc.run(max_loops=1 if a.once else None)
     except KeyboardInterrupt:
@@ -510,23 +624,64 @@ def cmd_push_test(a) -> int:  # pragma: no cover - network
     return 0 if ok else 1
 
 
-def cmd_confirm_broker(a) -> int:  # pragma: no cover - interactive
-    from ayesha.broker import FIELDS, load_assumed, save_confirmed
+def cmd_confirm_broker(a) -> int:  # interactive; tested through `setup` with piped answers
+    """Per-pair Exness contract values typed from the Exness app, plus the account leverage."""
+    from ayesha.broker import FIELDS, load_assumed, load_confirmed, save_confirmed, save_leverage
 
     base = load_assumed(a.account_type)
-    print(f"Open the Exness app -> EURUSD -> Specification (account type {a.account_type}).")
-    print("Type each value exactly as shown there. Press Enter to cancel.")
-    vals = {}
-    for k in FIELDS:
-        raw = input(f"  {k} (repo assumption {base[k]}): ").strip()
+    pairs = [x.strip().upper() for x in (getattr(a, "symbols", None) or "").split(",") if x.strip()] or \
+        [x.upper() for x in load_spec(a.spec)["pairs"]["enabled"]]
+    print(f"Account type {a.account_type}. Type each value exactly as the Exness app shows it. Enter on the first "
+          "question cancels.")
+    while True:
+        raw = _ask("  Account leverage, e.g. 2000 for 1:2000, or U for unlimited: ").strip().upper()
         if not raw:
             print("Cancelled; nothing saved.")
             return 1
-        vals[k] = float(raw)
-    if any(abs(vals[k] - float(base[k])) > 1e-9 for k in FIELDS):
-        print("NOTE: values differ from the repo assumption; your typed values will be used.")
-    path = save_confirmed(a.account_type, vals)
-    print(f"Saved owner-confirmed spec to {path}")
+        try:
+            lev = "UNLIMITED" if raw in ("U", "UNLIMITED") else float(raw.replace("1:", ""))
+            save_leverage(a.account_type, lev)
+            break
+        except ValueError as e:
+            print(f"  {e}")
+    prev = None
+    saved = []
+    for sym in pairs:
+        vals = None
+        if prev is not None:
+            k = _ask(f"{sym}: open {sym} -> Specification. Same contract size / min / step / max lot as {prev[0]}? "
+                     "Y = yes, I checked / N = type them / S = skip: ").upper()
+            if k == "S":
+                print(f"  {sym} skipped: it stays unverified (no READY for {sym}).")
+                continue
+            if k == "Y":
+                vals = {f: prev[1][f] for f in FIELDS}
+        if vals is None:
+            print(f"{sym}: Exness app -> {sym} -> Specification")
+            vals = {}
+            for f in FIELDS:
+                while True:
+                    raw = _ask(f"  {f} (repo assumption {base[f]}): ")
+                    try:
+                        v = float(raw)
+                        if v > 0:
+                            vals[f] = v
+                            break
+                    except ValueError:
+                        pass
+                    print("  Please type a positive number.")
+        old = load_confirmed(a.account_type, None, sym) or {}
+        dflt = old.get("typical_spread_pips", base.get("typical_spread_pips", 1.0))
+        raw = _ask(f"  {sym} typical spread in pips when the market is calm (Enter = {dflt}): ")
+        try:
+            vals["typical_spread_pips"] = float(raw) if raw else float(dflt)
+        except ValueError:
+            vals["typical_spread_pips"] = float(dflt)
+        save_confirmed(a.account_type, vals, symbol=sym)
+        saved.append(sym)
+        prev = (sym, vals)
+    print(f"Saved owner-confirmed spec for {', '.join(saved) or 'no pair'} "
+          f"(leverage {'unlimited' if lev == 'UNLIMITED' else f'1:{lev:g}'}).")
     return 0
 
 
@@ -623,7 +778,7 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--feed", default="mt5", choices=["mt5", "oanda"],
                        help="mt5 = local MT5 terminal; oanda = OANDA v20 API (no MT5, token in AYESHA_OANDA_TOKEN)")
         s.add_argument("--oanda-env", default="practice", choices=["practice", "live"])
-        s.add_argument("--equity", type=float, help="your Exness equity in USD (required with --feed oanda for scan)")
+        s.add_argument("--equity", type=float, help="research commands only; the scanner sizes from `ayesha capital`")
         s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
 
     s = sub.add_parser("export", help="export closed bars to CSV from MT5 or OANDA")
@@ -726,9 +881,25 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("push-test", help="send a signed test heartbeat to the phone app")
     s.set_defaults(fn=cmd_push_test)
 
-    s = sub.add_parser("confirm-broker", help="type the Exness contract values from the Exness app (no MT5)")
+    s = sub.add_parser("confirm-broker", help="type the Exness contract values per pair from the Exness app (no MT5)")
     s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
+    s.add_argument("--symbols", help="comma list (default: every enabled pair)")
     s.set_defaults(fn=cmd_confirm_broker)
+
+    s = sub.add_parser("capital", help="update / confirm your Exness equity and open trades (sizing source)")
+    s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
+    s.add_argument("--equity", help="equity shown in Exness (USD; USC for a Cent account)")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--deposit", type=float, help="this update follows a deposit of this amount")
+    g.add_argument("--withdrawal", type=float, help="this update follows a withdrawal of this amount")
+    g.add_argument("--confirm", action="store_true", help="equity unchanged, just re-confirming")
+    s.add_argument("--positions", help='open trades, e.g. "EURUSD BUY 0.50,GBPUSD SELL"')
+    s.add_argument("--no-positions", action="store_true", help="confirm there are no open trades")
+    s.add_argument("--free-margin", help="free margin shown in Exness (needed with open trades)")
+    s.add_argument("--show", action="store_true", help="print the latest snapshot and whether it is valid")
+    s.add_argument("--session-start", action="store_true", help="prompt once if a person is at the keyboard")
+    s.add_argument("--file", help=argparse.SUPPRESS)
+    s.set_defaults(fn=cmd_capital)
 
     return p
 

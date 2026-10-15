@@ -3,8 +3,8 @@ setlocal EnableExtensions
 title AYESHA FX - one-time setup (advisory only, never places orders)
 REM Double-click once. Installs the scanner and runs `ayesha setup`: OANDA token (typed hidden,
 REM saved in YOUR Windows user settings through the registry API, never in the repository or on a
-REM command line), Exness equity, Exness contract values, phone pairing, health check, optional
-REM Startup entry. Safe to run again: Enter keeps each value.
+REM command line), Exness equity and open trades (capital snapshot), Exness contract values per pair,
+REM phone pairing, health check, optional Startup entry. Safe to run again: Enter keeps each value.
 REM Optional argument: --no-publish (skip the phone relay test).
 
 cd /d "%~dp0\.."

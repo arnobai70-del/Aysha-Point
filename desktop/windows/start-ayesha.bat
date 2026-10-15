@@ -10,25 +10,27 @@ if not defined AYESHA_HOME set "AYESHA_HOME=%USERPROFILE%\AyeshaFX"
 if not defined AYESHA_RESTART_DELAY set "AYESHA_RESTART_DELAY=60"
 set "MAX=%~1"
 if not exist "%AYESHA_HOME%\python-path.txt" goto notsetup
-if not exist "%AYESHA_HOME%\equity.txt" goto notsetup
+if not exist "%AYESHA_HOME%\capital.json" goto notsetup
 set /p PYEXE=<"%AYESHA_HOME%\python-path.txt"
-set /p EQ=<"%AYESHA_HOME%\equity.txt"
 if not exist "%PYEXE%" (
   echo Python was moved or removed: "%PYEXE%". Run install.bat again.
   if not defined AYESHA_NONINTERACTIVE pause
   exit /b 1
 )
+REM Capital is variable: confirm today's Exness equity and open trades (Enter keeps the last value).
+REM The scanner re-reads capital.json on every bar, so "ayesha capital" in another window also works.
+"%PYEXE%" -m ayesha.cli capital --session-start --account-type Standard
 set /a RESTARTS=0
 :loop
-echo %date% %time%  starting scanner, equity %EQ% USD. Close this window to stop.
-"%PYEXE%" -m ayesha.cli scan --feed oanda --equity %EQ% --account-type Standard --news-ff --push
+echo %date% %time%  starting scanner. Close this window to stop.
+"%PYEXE%" -m ayesha.cli scan --feed oanda --account-type Standard --news-ff --push
 set "RC=!ERRORLEVEL!"
 if "!RC!"=="0" (
   echo Scanner stopped.
   exit /b 0
 )
 if "!RC!"=="2" (
-  echo CONFIG PROBLEM: run install.bat again ^(token, equity^). Not restarting.
+  echo CONFIG PROBLEM: run install.bat again ^(token, capital^). Not restarting.
   if not defined AYESHA_NONINTERACTIVE pause
   exit /b 2
 )
