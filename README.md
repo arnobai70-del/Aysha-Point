@@ -13,13 +13,17 @@ normal, often correct, output.
 
 ## Quick start (no MT5 needed)
 
-1. Copy [`tradingview/AyeshaSmartMoney.pine`](tradingview/AyeshaSmartMoney.pine) into TradingView's Pine Editor and add it to a 15m chart.
-2. Create an alert on each pair: Condition **AYESHA → Any alert() function call**, **Notify in app**.
-3. The TradingView phone app shows the alert; open that pair to see the numbered reasons on the chart.
+**Status:** demo/paper only, fail-closed. See [`docs/STATUS.md`](docs/STATUS.md) and [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
 
-4. Optional phone app: install [`ayesha-fx.apk`](https://github.com/arnobai70-del/Aysha-Point/releases/latest/download/ayesha-fx.apk); it reads the TradingView AYESHA alerts and shows details, lot and an "open TradingView" button.
+**Free path (Mode B, canonical):** PC scanner on OANDA practice data → signed push (ntfy.sh) → AYESHA phone app.
+Guide (বাংলা): [`docs/08-pc-scanner-no-mt5.md`](docs/08-pc-scanner-no-mt5.md).
 
-Guides (বাংলা): [`docs/05-tradingview-guide.md`](docs/05-tradingview-guide.md) · [`docs/06-android-guide.md`](docs/06-android-guide.md)
+1. Phone: install [`ayesha-fx.apk`](https://github.com/arnobai70-del/Aysha-Point/releases/latest/download/ayesha-fx.apk).
+2. PC: `pip install -e desktop`, set `AYESHA_OANDA_TOKEN`, run `ayesha confirm-broker`, `ayesha pair` (type the code in the app), `ayesha push-test`.
+3. Run `desktop\windows\run-scanner.bat` (`ayesha scan --feed oanda --equity 25 --news-ff --push`).
+
+**Chart:** copy [`tradingview/AyeshaSmartMoney.pine`](tradingview/AyeshaSmartMoney.pine) into TradingView (15m) to see ①–④ on the chart.
+TradingView-to-phone alerts (Mode A) need a plan with technical alerts; Basic lists none. Guides: [`docs/05-tradingview-guide.md`](docs/05-tradingview-guide.md) · [`docs/06-android-guide.md`](docs/06-android-guide.md)
 
 ## Optional Python tools (phases 1, 2, 4, 5, 6)
 
@@ -28,8 +32,9 @@ Guides (বাংলা): [`docs/05-tradingview-guide.md`](docs/05-tradingview-g
 | `ayesha lot-table --equity 20` | Shows what the 0.01 minimum lot would risk for typical stops | No |
 | `ayesha risk ...` | Sizes one trade idea and runs every hard gate | No |
 | `ayesha spec-check` | Reads real Exness contract specs and spreads, read-only | Yes (Windows) |
-| `ayesha export --symbol EURUSD --tf M15 --days 730 --out eurusd_m15.csv` | Saves closed bars to CSV | Yes (Windows) |
-| `ayesha scan --news data\calendar.csv [--telegram]` | Live advisory scanner, READY alerts, signal registry | Yes (Windows) |
+| `ayesha export --feed oanda --symbol EURUSD --tf M15 --days 730 --out eurusd_m15.csv` | Saves closed BID bars (+spread) to CSV | No (`--feed mt5` uses MT5) |
+| `ayesha scan --feed oanda --equity 25 --news-ff --push` | Live advisory scanner, signal registry, signed phone push | No (`--feed mt5` uses MT5) |
+| `ayesha confirm-broker` / `ayesha pair` / `ayesha push-test` | Owner-confirmed Exness spec, phone pairing code, test push | No |
 | `ayesha signals` / `ayesha mark --id ... --placed` | Signal list and manual journal | No |
 | `ayesha backtest --csv eurusd_m15.csv --symbol EURUSD --equity 20 --split 2025-07-01` | Bar-by-bar replay of the SWEEP_MSS_FVG setup, results in R after spread | No |
 
@@ -37,11 +42,11 @@ Guides (বাংলা): [`docs/05-tradingview-guide.md`](docs/05-tradingview-g
 
 ```
 contracts/       strategy-spec.yaml (canonical rules, hashed), signal.schema.json
-desktop/ayesha/  risk/ feed/ (MT5 read-only, CSV) rules/ (primitives, strategy) backtest/ news/ sessions.py cli.py
-desktop/tests/   69 tests: risk gates, DST sessions, primitives, zero-lookahead, fills, scanner, safety
+desktop/ayesha/  risk/ feed/ (MT5 read-only, OANDA v20 read-only, CSV) broker.py delivery/ (console, Telegram, ntfy push) rules/ (primitives, strategy) backtest/ news/ sessions.py cli.py
+desktop/tests/   84 tests: risk gates, DST sessions, primitives, zero-lookahead, fills, scanner, OANDA feed, push signing, safety
 scripts/         check_no_order_api.py (CI fails on any trading call)
 tradingview/     AyeshaSmartMoney.pine (generated chart helper) + template
-android/         Kotlin app (no extra libraries): alert reader, inbox, details, lot calc; APK built by GitHub Actions
+android/         Kotlin app (no extra libraries): PC link, TradingView alert reader, inbox, checks, lot calc; APK built by GitHub Actions
 ```
 
 ## Develop

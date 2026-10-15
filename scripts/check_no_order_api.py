@@ -12,9 +12,11 @@ from pathlib import Path
 FORBIDDEN = re.compile(
     r"\b(order_send|order_check|order_modify|position_close|positions_close|TRADE_ACTION_\w+|"
     r"OrderSend|OrderModify|OrderClose|PositionClose|strategy\.entry|strategy\.order|strategy\.close)\b"
+    # OANDA v20 write endpoints (the data feed may only call /candles)
+    r"|/v3/accounts/[^\s\"']*/(orders|trades|positions)"
 )
 EXTS = {".py", ".pine", ".kt", ".kts", ".java", ".js", ".ts"}
-ALLOW = {"scripts/check_no_order_api.py", "desktop/tests/test_safety_config_news.py"}
+ALLOW = {"scripts/check_no_order_api.py", "desktop/tests/test_safety_config_news.py"}  # tests contain forbidden names on purpose
 SKIP_DIRS = {".git", "node_modules", "build", ".venv", "venv", "__pycache__", ".gradle"}
 
 

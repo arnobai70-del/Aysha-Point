@@ -19,14 +19,20 @@ class AlertListener : NotificationListenerService() {
         if (sbn.packageName !in SOURCES) return
         val text = textOf(sbn.notification) ?: return
         if (!text.contains("AYESHA")) return
+        Prefs(applicationContext).lastTvSeenMs = System.currentTimeMillis()
         handle(applicationContext, text, sbn.postTime)
     }
 
     companion object {
         val SOURCES = setOf("com.tradingview.tradingviewapp")
 
-        fun handle(context: Context, text: String, postTimeMs: Long, isTest: Boolean = false) {
-            val alert = AlertParser.parse(text, postTimeMs, isTest) ?: return
+        /** TradingView text is never signed, so it can never be READY (signatureOk = false). */
+        fun handle(context: Context, text: String, postTimeMs: Long, isTest: Boolean = false, signatureOk: Boolean = false) {
+            val alert = AlertParser.parse(text, postTimeMs, isTest, signatureOk)
+            if (alert == null) {
+                Prefs(context).reject("পড়া যায়নি বা লেভেল ভুল: " + text.lineSequence().firstOrNull().orEmpty().take(60))
+                return
+            }
             if (AlertStore(context).add(alert)) {
                 Notifier.show(context, alert)
             }

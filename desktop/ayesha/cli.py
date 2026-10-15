@@ -103,21 +103,33 @@ def cmd_spec_check(a) -> int:  # pragma: no cover - needs Windows + MT5 terminal
     return 0
 
 
-def cmd_export(a) -> int:  # pragma: no cover - needs Windows + MT5 terminal
+def _make_feed(a, spec):  # pragma: no cover - needs MT5 terminal or an OANDA token + network
+    """MT5 (Windows terminal) or OANDA v20 (any PC, no MT5). Both are read-only."""
+    if a.feed == "oanda":
+        from ayesha.feed.oanda_feed import OandaFeed
+
+        return OandaFeed(equity_usd=a.equity or 0, account_type=a.account_type, environment=a.oanda_env)
     from ayesha.feed.mt5_feed import MT5ReadOnlyFeed
 
+    return MT5ReadOnlyFeed(server_utc_offset_hours=spec["feed"]["server_utc_offset_hours"])
+
+
+def cmd_export(a) -> int:  # pragma: no cover - needs a data feed
     spec = load_spec(a.spec)
-    feed = MT5ReadOnlyFeed(server_utc_offset_hours=spec["feed"]["server_utc_offset_hours"])
+    if a.feed == "oanda" and not a.equity:
+        a.equity = 1.0  # export only reads prices; equity is not used
+    feed = _make_feed(a, spec)
     feed.connect()
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=a.days)
     bars = feed.candles(a.symbol, a.tf, start, end)
-    inst = feed.instrument(a.symbol)
+    point = 0.001 if a.symbol.upper().endswith("JPY") else 0.00001
     # drop the still-forming last bar
     minutes = {"M1": 1, "M5": 5, "M15": 15, "H1": 60, "H4": 240, "D1": 1440}[a.tf]
     bars = [b for b in bars if b.time + timedelta(minutes=minutes) <= end]
-    save_candles(a.out, bars, inst.point)
-    print(f"Saved {len(bars)} closed {a.tf} bars for {a.symbol} to {a.out} (point={inst.point})")
+    save_candles(a.out, bars, point)
+    src = getattr(feed, "source_name", "MT5")
+    print(f"Saved {len(bars)} closed {a.tf} BID bars for {a.symbol} from {src} to {a.out} (spread column = ask-bid)")
     feed.close()
     return 0
 
@@ -168,28 +180,48 @@ def _db_path(a) -> str:
     return str(p)
 
 
-def cmd_scan(a) -> int:  # pragma: no cover - needs Windows + MT5 terminal
+def cmd_scan(a) -> int:  # pragma: no cover - needs a live data feed
     from ayesha.delivery.notify import ConsoleNotifier, TelegramNotifier
-    from ayesha.feed.mt5_feed import MT5ReadOnlyFeed
     from ayesha.news.calendar import NewsCalendar
     from ayesha.scanner import Scanner
     from ayesha.storage.db import Registry
 
     spec = load_spec(a.spec)
-    feed = MT5ReadOnlyFeed(server_utc_offset_hours=spec["feed"]["server_utc_offset_hours"])
+    if a.feed == "oanda" and not (a.equity and a.equity > 0):
+        print("--equity (your Exness equity in USD) is required with --feed oanda")
+        return 2
+    feed = _make_feed(a, spec)
     acct = feed.connect()
     print(f"Connected read-only: {acct['server']} {acct['trade_mode']} {acct['currency']} | strategy "
           f"{spec['strategy_version']} ({spec['strategy_hash']})")
     notifiers = [ConsoleNotifier()]
     if a.telegram:
         notifiers.append(TelegramNotifier())
+    if a.push:
+        from ayesha.delivery.push import NtfyNotifier, load_or_create_code
+
+        notifiers.append(NtfyNotifier(load_or_create_code()))
+        print("Phone push: ON (ntfy.sh relay, signed). Pairing code: `ayesha pair`.")
+    n = spec["news"]
+    news_kw = dict(before_min=n["block_minutes_before"], after_min=n["block_minutes_after"],
+                   impacts=tuple(n["impacts_blocked"]))
     cal = None
     if a.news:
-        n = spec["news"]
-        cal = NewsCalendar.from_csv(a.news, before_min=n["block_minutes_before"], after_min=n["block_minutes_after"],
-                                    impacts=tuple(n["impacts_blocked"]))
+        cal = NewsCalendar.from_csv(a.news, **news_kw)
+    elif a.news_ff:
+        from ayesha.news.ff_feed import FFCalendarSource
+
+        src = FFCalendarSource(Path(_db_path(a)).parent / "ff_calendar.json")
+        cal = src.calendar(**news_kw)
+        if cal is None:
+            print(f"WARNING: Forex Factory calendar unavailable ({src.last_error}). Signals => NEWS_UNVERIFIED.")
     elif spec["risk"]["strict_news"]:
-        print("WARNING: no --news calendar. Strict mode => every candidate is NO_TRADE: NEWS_UNVERIFIED.")
+        print("WARNING: no --news / --news-ff calendar. Strict mode => every candidate is NO_TRADE: NEWS_UNVERIFIED.")
+    if a.feed == "oanda":
+        from ayesha.broker import load_confirmed
+
+        if load_confirmed(a.account_type) is None:
+            print("WARNING: Exness contract not confirmed (`ayesha confirm-broker`). Signals => CONTRACT_SPEC_UNVERIFIED.")
     sc = Scanner(feed, spec, Registry(_db_path(a)), notifiers, cal)
     try:
         sc.run(max_loops=1 if a.once else None)
@@ -197,6 +229,50 @@ def cmd_scan(a) -> int:  # pragma: no cover - needs Windows + MT5 terminal
         print("Stopped.")
     finally:
         feed.close()
+    return 0
+
+
+def cmd_pair(a) -> int:
+    from ayesha.delivery.push import default_code_path, load_or_create_code, topic_for
+
+    p = default_code_path()
+    if a.new and p.exists():
+        p.unlink()
+    code = load_or_create_code()
+    pretty = "-".join(code[i:i + 4] for i in range(0, 16, 4))
+    print(f"Pairing code: {pretty}")
+    print("Type it in the AYESHA app: Settings -> PC link -> Pairing code. Keep it private.")
+    print(f"(relay topic: {topic_for(code)}; stored in {p})")
+    return 0
+
+
+def cmd_push_test(a) -> int:  # pragma: no cover - network
+    from ayesha.delivery.push import NtfyNotifier, load_or_create_code
+
+    n = NtfyNotifier(load_or_create_code())
+    ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    ok, detail = n.heartbeat(ms, "TEST", 0, load_spec(a.spec)["strategy_hash"])
+    print("OK: test heartbeat sent; the app should show 'PC link: test received'" if ok else f"FAILED: {detail}")
+    return 0 if ok else 1
+
+
+def cmd_confirm_broker(a) -> int:  # pragma: no cover - interactive
+    from ayesha.broker import FIELDS, load_assumed, save_confirmed
+
+    base = load_assumed(a.account_type)
+    print(f"Open the Exness app -> EURUSD -> Specification (account type {a.account_type}).")
+    print("Type each value exactly as shown there. Press Enter to cancel.")
+    vals = {}
+    for k in FIELDS:
+        raw = input(f"  {k} (repo assumption {base[k]}): ").strip()
+        if not raw:
+            print("Cancelled; nothing saved.")
+            return 1
+        vals[k] = float(raw)
+    if any(abs(vals[k] - float(base[k])) > 1e-9 for k in FIELDS):
+        print("NOTE: values differ from the repo assumption; your typed values will be used.")
+    path = save_confirmed(a.account_type, vals)
+    print(f"Saved owner-confirmed spec to {path}")
     return 0
 
 
@@ -284,7 +360,15 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("spec-check", help="read real contract specs from the local MT5 terminal (Windows)")
     s.set_defaults(fn=cmd_spec_check)
 
-    s = sub.add_parser("export", help="export closed bars from MT5 to CSV (Windows)")
+    def feed_args(s, need_equity=False):
+        s.add_argument("--feed", default="mt5", choices=["mt5", "oanda"],
+                       help="mt5 = local MT5 terminal; oanda = OANDA v20 API (no MT5, token in AYESHA_OANDA_TOKEN)")
+        s.add_argument("--oanda-env", default="practice", choices=["practice", "live"])
+        s.add_argument("--equity", type=float, help="your Exness equity in USD (required with --feed oanda for scan)")
+        s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
+
+    s = sub.add_parser("export", help="export closed bars to CSV from MT5 or OANDA")
+    feed_args(s)
     s.add_argument("--symbol", required=True)
     s.add_argument("--tf", default="M15", choices=["M1", "M5", "M15", "H1", "H4", "D1"])
     s.add_argument("--days", type=int, default=730)
@@ -302,9 +386,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--trades-csv", help="write per-signal CSV (with --out)")
     s.set_defaults(fn=cmd_backtest)
 
-    s = sub.add_parser("scan", help="live advisory scanner on the local MT5 terminal (Windows)")
+    s = sub.add_parser("scan", help="live advisory scanner (MT5 terminal or OANDA data, no orders)")
+    feed_args(s)
     s.add_argument("--db")
     s.add_argument("--news", help="calendar CSV")
+    s.add_argument("--news-ff", action="store_true", help="use the Forex Factory weekly calendar export (cached)")
+    s.add_argument("--push", action="store_true", help="send signals + heartbeat to the AYESHA phone app (ntfy.sh)")
     s.add_argument("--telegram", action="store_true", help="also send READY alerts to Telegram")
     s.add_argument("--once", action="store_true", help="warm up, run one pass, exit")
     s.set_defaults(fn=cmd_scan)
@@ -327,6 +414,17 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("telegram-test", help="send a test Telegram message")
     s.set_defaults(fn=cmd_telegram_test)
+
+    s = sub.add_parser("pair", help="show (or with --new, replace) the phone pairing code")
+    s.add_argument("--new", action="store_true")
+    s.set_defaults(fn=cmd_pair)
+
+    s = sub.add_parser("push-test", help="send a signed test heartbeat to the phone app")
+    s.set_defaults(fn=cmd_push_test)
+
+    s = sub.add_parser("confirm-broker", help="type the Exness contract values from the Exness app (no MT5)")
+    s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
+    s.set_defaults(fn=cmd_confirm_broker)
 
     a = p.parse_args(argv)
     return a.fn(a)

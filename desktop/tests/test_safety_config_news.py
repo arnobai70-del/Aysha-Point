@@ -137,3 +137,17 @@ def test_pine_alert_payload_matches_phone_parser():
     for key in ("TF=", "E=", "SL=", "TP=", "RR=", "LOT=", "EXP=", "SRC=", "TGT=", "BAR=", "QUSD=", "ST=CHART_CANDIDATE", "V="):
         assert f" {key}" in head, key
     assert 'str.tostring(time_close, "#")' in head
+
+
+def test_version_manifest_matches_components():
+    import json
+    import re
+
+    man = json.loads((ROOT / "contracts" / "version.json").read_text(encoding="utf-8"))
+    py = re.search(r'^version = "([^"]+)"', (ROOT / "desktop" / "pyproject.toml").read_text(), re.M).group(1)
+    gradle = re.search(r'versionName = "([^"]+)"', (ROOT / "android" / "app" / "build.gradle.kts").read_text()).group(1)
+    assert man["components"]["desktop"] == py
+    assert man["components"]["android_app"] == gradle
+    assert man["components"]["strategy"] == load_spec()["strategy_version"]
+    top = re.search(r"^## (\S+)", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), re.M).group(1)
+    assert top == man["release"]

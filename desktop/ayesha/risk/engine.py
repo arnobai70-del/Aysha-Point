@@ -91,7 +91,7 @@ def evaluate(
     """Size a proposal and apply every hard gate. `live=False` is for research/backtests only."""
     d = RiskDecision(ok=False)
     b = d.blockers
-    if live and not inst.source.startswith("MT5"):
+    if live and not (inst.source.startswith("MT5") or inst.source.startswith("OWNER_CONFIRMED:")):
         b.append("CONTRACT_SPEC_UNVERIFIED")
 
     # --- configuration and environment gates -------------------------------------------

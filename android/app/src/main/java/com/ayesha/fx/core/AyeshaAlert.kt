@@ -30,12 +30,24 @@ data class AyeshaAlert(
     val barCloseMs: Long? = null,
     /** USD per 1 unit of the quote currency as TradingView saw it (QUSD=). Null when missing. */
     val quoteUsd: Double? = null,
-    /** CHART_CANDIDATE: built from chart rules only; news, live spread and broker spec not verified. */
-    val status: String = CHART_CANDIDATE,
+    /** Status the sender declared (ST=): CHART_CANDIDATE from TradingView; READY / NO_TRADE / WATCH from the PC. "" = missing. */
+    val status: String = "",
+    /** "TV" for TradingView notifications, "PC" for the AYESHA PC scanner (FROM=PC). */
+    val origin: String = "TV",
+    /** PC canonical signal id (ID=), shared with the PC registry. */
+    val signalId: String = "",
+    /** PC-declared expiry (EXPU=, UTC ms). */
+    val expiresUtcMs: Long? = null,
+    /** PC risk-gate reason codes (BLK=). */
+    val blockers: List<String> = emptyList(),
+    /** True only when the message carried a valid signature for this phone's pairing code. */
+    val signatureOk: Boolean = false,
 ) {
     companion object {
         const val CHART_CANDIDATE = "CHART_CANDIDATE"
     }
+
+    val isPc: Boolean get() = origin == "PC"
 
     val isBuy: Boolean get() = direction == "BUY"
 
@@ -50,7 +62,7 @@ data class AyeshaAlert(
     val signalTimeMs: Long get() = barCloseMs ?: receivedAtMs
 
     /** Expiry counts from the signal bar, so a push that arrives late does not get extra life. */
-    val expiresAtMs: Long get() = signalTimeMs + expiryBars.toLong() * timeframeMinutes * 60_000L
+    val expiresAtMs: Long get() = expiresUtcMs ?: (signalTimeMs + expiryBars.toLong() * timeframeMinutes * 60_000L)
 
     /** How late the push reached the phone, or null if the indicator did not send BAR=. */
     val deliveryDelayMs: Long? get() = barCloseMs?.let { receivedAtMs - it }
@@ -89,7 +101,7 @@ object AlertParser {
      * Parse notification text. Only line 1 ("AYESHA BUY OANDA:EURUSD TF=15 E=... SL=... TP=...") is required;
      * the rest of the message, if present, becomes `why`. Returns null for anything else or for bad levels.
      */
-    fun parse(text: String, receivedAtMs: Long, isTest: Boolean = false): AyeshaAlert? {
+    fun parse(text: String, receivedAtMs: Long, isTest: Boolean = false, signatureOk: Boolean = false): AyeshaAlert? {
         val m = head.find(text) ?: return null
         val direction = m.groupValues[1]
         val symbol = m.groupValues[2]
@@ -103,15 +115,22 @@ object AlertParser {
         val ticker = symbol.substringAfter(':').uppercase()
         val tf = keys["TF"] ?: "15"
         val after = text.substring(m.range.last + 1).trim()
-        val why = after.lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")
+        val why = after.lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("SIG=") }.joinToString("\n")
         val tfMin = tf.toIntOrNull()?.takeIf { it > 0 } ?: 15
-        val expiryBars = keys["EXP"]?.toIntOrNull()?.takeIf { it in 1..500 } ?: 8
+        val origin = if (keys["FROM"] == "PC") "PC" else "TV"
+        val expiryBars = keys["EXP"]?.toIntOrNull()?.takeIf { it in 1..500 } ?: StrategyInfo.EXPIRY_BARS
+        val expU = keys["EXPU"]?.toLongOrNull()?.takeIf { it > 0 }
+        val sigId = keys["ID"]?.takeIf { Regex("[0-9a-f]{8,64}").matches(it) } ?: ""
         val bar = keys["BAR"]?.toLongOrNull()?.takeIf { it > 0 }
         if (bar != null && bar > receivedAtMs + MAX_CLOCK_SKEW_MS) return null
         val quoteUsd = num(keys["QUSD"])?.takeIf { it > 0 }
         // Same setup (same pair, side, chart bar) always gets the same id, however late or often it is pushed.
         // Old indicator versions without BAR= fall back to the arrival-time bucket.
-        val id = if (bar != null) "$symbol|$direction|$tf|$bar" else "$symbol|$direction|$entry|${receivedAtMs / (tfMin * 60_000L)}"
+        val id = when {
+            origin == "PC" && sigId.isNotEmpty() -> "PC|$sigId"
+            bar != null -> "$symbol|$direction|$tf|$bar"
+            else -> "$symbol|$direction|$entry|${receivedAtMs / (tfMin * 60_000L)}"
+        }
         return AyeshaAlert(
             id = id,
             direction = direction,
@@ -133,19 +152,25 @@ object AlertParser {
             isTest = isTest,
             barCloseMs = bar,
             quoteUsd = quoteUsd,
+            status = keys["ST"] ?: "",
+            origin = origin,
+            signalId = sigId,
+            expiresUtcMs = expU,
+            blockers = keys["BLK"]?.split(',')?.filter { it.isNotBlank() && it != "NONE" } ?: emptyList(),
+            signatureOk = signatureOk && origin == "PC",
         )
     }
 
     private fun num(s: String?): Double? = s?.toDoubleOrNull()?.takeIf { it.isFinite() }
 
-    const val SAMPLE =
-        "AYESHA BUY OANDA:EURUSD TF=15 E=1.08120 SL=1.07940 TP=1.08610 RR=2.55 LOT=0.00 EXP=8 SRC=PDL TGT=ASIA_H QUSD=1 ST=CHART_CANDIDATE V=test\n" +
+    val SAMPLE =
+        "AYESHA BUY OANDA:EURUSD TF=15 E=1.08120 SL=1.07940 TP=1.08610 RR=2.55 LOT=0.00 EXP=8 SRC=PDL TGT=ASIA_H QUSD=1 ST=CHART_CANDIDATE V=" + StrategyInfo.HASH + "\n" +
             "Why: 1) PDL swept 2) MSS up with displacement 3) FVG entry zone\n" +
             "TEST ALERT - not a real setup"
 
     /** Test alert stamped with a just-closed 15m bar, so it looks like a fresh live alert. */
     fun sample(nowMs: Long): String {
         val bar = nowMs - nowMs % (15 * 60_000L)
-        return SAMPLE.replaceFirst(" V=test", " BAR=$bar V=test")
+        return SAMPLE.replaceFirst(" V=", " BAR=$bar V=")
     }
 }

@@ -10,6 +10,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
+import com.ayesha.fx.core.Assess
+import com.ayesha.fx.core.Assessment
 import com.ayesha.fx.core.AyeshaAlert
 import com.ayesha.fx.core.LotCalc
 import com.ayesha.fx.core.LotResult
@@ -50,29 +52,41 @@ object Notifier {
         else -> "লেভেল ঠিক নেই"
     }
 
+    fun assess(context: Context, a: AyeshaAlert, nowMs: Long = System.currentTimeMillis()): Assessment =
+        Assess.assess(a, nowMs, lotFor(context, a), Prefs(context).watchlist)
+
+    fun stateLabel(state: String): String = when (state) {
+        Assess.READY -> "READY (PC যাচাই করেছে)"
+        Assess.CHART_CANDIDATE -> "চার্ট ক্যান্ডিডেট"
+        Assess.NO_TRADE -> "NO TRADE"
+        Assess.EXPIRED -> "মেয়াদ শেষ"
+        else -> "UNVERIFIED"
+    }
+
     fun show(context: Context, a: AyeshaAlert) {
         val prefs = Prefs(context)
         val now = System.currentTimeMillis()
         if (now < prefs.pausedUntilMs && !a.isTest) return
-        // A push that reaches the phone after the setup expired is stored for the record but never alerted.
-        if (a.isExpired(now) && !a.isTest) return
         val lot = lotFor(context, a)
-        val tradeable = lot.ok
-        if (!tradeable && !prefs.alertNoTrade && !a.isTest) return
+        val verdict = Assess.assess(a, now, lot, prefs.watchlist)
+        // Entry notifications only for READY / CHART_CANDIDATE. NO_TRADE only if the owner asked for it.
+        // UNVERIFIED and EXPIRED alerts are archived silently, with their reasons, in the inbox.
+        val show = verdict.actionable || (verdict.state == Assess.NO_TRADE && prefs.alertNoTrade)
+        if (!show && !a.isTest) return
         if (!canPost(context)) return
         ensureChannel(context)
 
         val icon = if (a.isBuy) "🟢" else "🔴"
-        val title = "$icon ${a.direction} ${a.ticker} · " + (if (tradeable) "চার্ট ক্যান্ডিডেট" else lot.status.replace('_', ' ')) +
-            (if (a.isTest) " · TEST" else "")
+        val title = "$icon ${a.direction} ${a.ticker} · " + stateLabel(verdict.state) + (if (a.isTest) " · TEST" else "")
         val lotLine = if (lot.ok) {
             "Lot ${"%.2f".format(Locale.US, lot.lot)} · max loss \$${"%.2f".format(Locale.US, lot.maxLossUsd)}"
         } else {
             statusText(lot) + " — " + lot.note
         }
-        val late = if (a.isDelayed) "\n⚠️ নোটিফিকেশন দেরিতে এসেছে (${(a.deliveryDelayMs ?: 0) / 60_000} মিনিট)" else ""
+        val check = if (verdict.state == Assess.READY) "Exness অ্যাপে দাম আর spread মিলিয়ে নিন।"
+            else "News আর Exness spread যাচাই হয়নি, নিজে দেখে নিন।"
         val body = "Entry ${a.fmt(a.entry)} · SL ${a.fmt(a.stop)} · TP ${a.fmt(a.target)} · RR ${"%.2f".format(Locale.US, a.rr)}\n" +
-            "$lotLine\nNews আর Exness spread যাচাই হয়নি, নিজে দেখে নিন।$late"
+            "$lotLine\n" + (if (verdict.actionable) check else verdict.reasons.joinToString("; "))
 
         val open = Intent(context, DetailActivity::class.java)
             .putExtra(DetailActivity.EXTRA_ID, a.id)

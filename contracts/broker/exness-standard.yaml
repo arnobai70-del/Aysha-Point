@@ -1,0 +1,21 @@
+# Exness contract assumptions used when MT5 is not connected.
+# These are NOT verified until the owner runs `ayesha confirm-broker` and types the values
+# shown in the Exness app (instrument -> Specification). Until then live signals stay UNVERIFIED.
+broker: EXNESS
+accounts:
+  Standard:          # balance in USD
+    contract_size: 100000
+    volume_min: 0.01
+    volume_step: 0.01
+    volume_max: 200
+    commission_per_lot_round_trip: 0
+    stops_level_points: 0
+    typical_spread_pips: 1.0   # used when the data feed's spread is lower (feed is not Exness)
+  StandardCent:      # balance in US cents; enter equity in USD (USC / 100)
+    contract_size: 1000
+    volume_min: 0.01
+    volume_step: 0.01
+    volume_max: 200
+    commission_per_lot_round_trip: 0
+    stops_level_points: 0
+    typical_spread_pips: 1.0

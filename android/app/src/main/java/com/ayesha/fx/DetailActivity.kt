@@ -9,7 +9,9 @@ import android.os.Bundle
 import android.text.format.DateFormat
 import android.widget.LinearLayout
 import android.widget.Toast
+import com.ayesha.fx.core.Assess
 import com.ayesha.fx.core.LotCalc
+import com.ayesha.fx.core.StrategyInfo
 import java.util.Date
 import java.util.Locale
 
@@ -57,23 +59,34 @@ class DetailActivity : Activity() {
         if (a.isDelayed) {
             head.addView(Ui.text(this, "⚠️ ফোনে এসেছে ${(a.deliveryDelayMs ?: 0) / 60_000} মিনিট দেরিতে। দাম মিলিয়ে নিন।", 13f, Ui.WATCH))
         }
-        if (!a.hasBarTime) {
-            head.addView(Ui.text(this, "পুরনো indicator: মেয়াদ ফোনে পৌঁছানোর সময় থেকে ধরা হয়েছে। নতুন indicator বসান।", 12f, Ui.WATCH))
-        }
         head.addView(Ui.text(this,
             if (expired) "⌛ মেয়াদ শেষ ($exp)। এখন আর এই entry নেবেন না।" else "⏳ $exp পর্যন্ত বৈধ। দাম entry থেকে অনেক দূরে চলে গেলে পিছনে দৌড়াবেন না।",
             14f, if (expired) Ui.WATCH else Ui.TEXT))
         col.addView(head)
 
-        // What was and was not checked. A chart alert is only a candidate until the owner checks the rest.
-        val gates = Ui.card(this, Ui.WATCH)
-        gates.addView(Ui.text(this, "অবস্থা: CHART CANDIDATE (চার্ট ক্যান্ডিডেট)", 15f, Ui.WATCH, bold = true))
-        gates.addView(Ui.text(this,
-            "✅ চার্টের নিয়ম: sweep → MSS → FVG, RR ≥ ২ (আন্দাজি spread সহ)\n" +
-                "❌ বড় নিউজ যাচাই হয়নি — ForexFactory/Investing calendar দেখুন\n" +
-                "❌ Exness-এর আসল spread যাচাই হয়নি — অ্যাপে spread দেখুন\n" +
-                "❌ Exness-এর contract/লট নিয়ম যাচাই হয়নি — অ্যাপে লট মিলিয়ে নিন\n" +
-                "এই তিনটা ঠিক থাকলে তবেই ট্রেড বিবেচনা করুন।", 13f))
+        // What was and was not checked, with the reasons. Never implies execution approval.
+        val v = Notifier.assess(this, a, now)
+        val gates = Ui.card(this, when (v.state) {
+            Assess.READY -> Ui.BULL
+            Assess.CHART_CANDIDATE -> Ui.WATCH
+            else -> Ui.BEAR
+        })
+        gates.addView(Ui.text(this, "অবস্থা: ${Notifier.stateLabel(v.state)} · উৎস ${if (a.isPc) "PC scanner" + (if (a.signatureOk) " (সই ঠিক)" else " (সই নেই!)") else "TradingView চার্ট"}", 15f, bold = true))
+        for (r in v.reasons) gates.addView(Ui.text(this, "• $r", 13f))
+        if (v.state == Assess.CHART_CANDIDATE) {
+            gates.addView(Ui.text(this,
+                "✅ চার্টের নিয়ম: sweep → MSS → FVG, RR ≥ ${StrategyInfo.MIN_NET_RR} (আন্দাজি spread সহ)\n" +
+                    "❌ বড় নিউজ যাচাই হয়নি — ForexFactory/Investing calendar দেখুন\n" +
+                    "❌ Exness-এর আসল spread যাচাই হয়নি — অ্যাপে spread দেখুন\n" +
+                    "❌ Exness-এর contract/লট নিয়ম যাচাই হয়নি — অ্যাপে লট মিলিয়ে নিন", 13f))
+        }
+        if (a.isPc && a.chartLot > 0) {
+            gates.addView(Ui.text(this, "PC-র হিসাবে লট ${f2(a.chartLot)} (PC-র equity দিয়ে)। নিচের লট এই ফোনের settings দিয়ে; দুটো আলাদা হলে settings মিলিয়ে নিন।", 12f, Ui.MUTED))
+        }
+        if (a.isPc) {
+            gates.addView(Ui.text(this, "PC-র দাম OANDA/MT5 feed থেকে; Exness-এর দাম সামান্য আলাদা হতে পারে।", 12f, Ui.MUTED))
+        }
+        gates.addView(Ui.text(this, "এটা ট্রেডের অনুমতি নয়। সিদ্ধান্ত আপনার, অর্ডার আপনি নিজে Exness অ্যাপে দেবেন।", 12f, Ui.MUTED))
         col.addView(gates)
 
         val lv = Ui.card(this, Ui.SKY)
@@ -109,7 +122,9 @@ class DetailActivity : Activity() {
         why.addView(Ui.text(this, "কেন এই সিগন্যাল", 13f, Ui.MUTED))
         why.addView(Ui.text(this, "① ${a.source} liquidity sweep হয়েছে\n② উল্টো দিকে MSS (displacement সহ)\n③ FVG-তে entry zone\n④ Target: ${a.targetName}", 15f))
         if (a.why.isNotBlank()) why.addView(Ui.text(this, a.why, 12f, Ui.MUTED))
-        why.addView(Ui.text(this, "চার্টে ①–④ চিহ্নগুলো দেখতে নিচের বাটন চাপুন।", 12f, Ui.MUTED))
+        why.addView(Ui.text(this,
+            if (a.isPc) "TradingView-এর AYESHA indicator নিজে আলাদা হিসাব করে; PC-র লেভেলের সাথে চার্টের ①–④ হুবহু মিলবে এমন নিশ্চয়তা নেই (feed আলাদা হতে পারে)।"
+            else "চার্টে ①–④ চিহ্নগুলো দেখতে নিচের বাটন চাপুন।", 12f, Ui.MUTED))
         col.addView(why)
 
         col.addView(Ui.button(this, "📈 TradingView-এ ${a.ticker} খুলুন", Ui.SKY) { openTradingView(a.tradingViewUrl()) })

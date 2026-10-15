@@ -2,7 +2,7 @@ name: build-android
 on:
   push:
     branches: [main]
-    paths: ["android/**", ".github/workflows/build-android.yml"]
+    paths: ["android/**", "contracts/**", ".github/workflows/build-android.yml"]
   workflow_dispatch:
 
 permissions:
@@ -44,6 +44,12 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk ayesha-fx.apk
           sha256sum ayesha-fx.apk > ayesha-fx.apk.sha256
+          VN=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' android/app/build.gradle.kts)
+          HASH=$(sed -n 's/.*const val HASH = "\(.*\)".*/\1/p' android/app/src/main/java/com/ayesha/fx/core/StrategyInfo.kt)
+          echo "VN=$VN" >> "$GITHUB_ENV"
+          echo "STRATEGY_HASH=$HASH" >> "$GITHUB_ENV"
+          echo "APK_SHA=$(cut -d' ' -f1 ayesha-fx.apk.sha256)" >> "$GITHUB_ENV"
+          if [ -n "$AYESHA_KEYSTORE" ]; then echo "SIGNING=release key" >> "$GITHUB_ENV"; else echo "SIGNING=CI debug key (updates need uninstall until a release key is configured)" >> "$GITHUB_ENV"; fi
       - uses: actions/upload-artifact@v4
         with:
           name: ayesha-fx-apk
@@ -53,12 +59,19 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: android-v0.1.${{ github.run_number }}
-          name: AYESHA FX Android 0.1.${{ github.run_number }}
+          tag_name: android-v${{ env.VN }}-b${{ github.run_number }}
+          name: AYESHA FX Android ${{ env.VN }} (build ${{ github.run_number }})
           make_latest: "true"
           body: |
             Android app for AYESHA FX. Download `ayesha-fx.apk` on your phone and install.
             Setup guide: docs/06-android-guide.md. The app never places orders.
+
+            - App version: ${{ env.VN }} (build ${{ github.run_number }})
+            - Commit: ${{ github.sha }}
+            - Strategy hash: ${{ env.STRATEGY_HASH }}
+            - APK SHA-256: ${{ env.APK_SHA }}
+            - Signed with: ${{ env.SIGNING }}
+            - Verification: unit tests + build only. NOT yet tested on a real Android 13 phone (see docs/VERIFICATION.md).
           files: |
             ayesha-fx.apk
             ayesha-fx.apk.sha256

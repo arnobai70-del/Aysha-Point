@@ -10,12 +10,16 @@ import android.text.format.DateFormat
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.ayesha.fx.core.AlertParser
+import com.ayesha.fx.core.Assess
 import com.ayesha.fx.core.SettingsCheck
+import com.ayesha.fx.core.StrategyInfo
 import java.util.Date
+import java.util.Locale
 
-/** Home: setup status + alert inbox. */
+/** Home: setup status, PC link health, diagnostics and the alert inbox (active / archive). */
 class MainActivity : Activity() {
     private lateinit var col: LinearLayout
+    private var showArchive = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,6 +31,7 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33 && !Notifier.canPost(this)) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+        LinkService.start(this)
     }
 
     override fun onResume() {
@@ -34,22 +39,33 @@ class MainActivity : Activity() {
         render()
     }
 
+    private fun ago(ms: Long): String {
+        if (ms <= 0) return "কখনো না"
+        val m = (System.currentTimeMillis() - ms) / 60_000
+        return when {
+            m < 1 -> "এইমাত্র"
+            m < 120 -> "$m মিনিট আগে"
+            else -> "${m / 60} ঘণ্টা আগে"
+        }
+    }
+
     private fun render() {
         col.removeAllViews()
         val prefs = Prefs(this)
         val listener = AlertListener.isEnabled(this)
         val notif = Notifier.canPost(this)
+        val now = System.currentTimeMillis()
 
         val status = Ui.card(this, if (listener && notif) Ui.BULL else Ui.WATCH)
         status.addView(Ui.text(this, "অবস্থা", 13f, Ui.MUTED))
         status.addView(Ui.text(this, (if (listener) "✅" else "⚠️") + " TradingView নোটিফিকেশন পড়ার অনুমতি", 15f))
         status.addView(Ui.text(this, (if (notif) "✅" else "⚠️") + " AYESHA নোটিফিকেশন দেখানোর অনুমতি", 15f))
-        status.addView(Ui.text(this, "Equity \$${prefs.equityUsd} · risk ${prefs.riskPercent}% · ${prefs.accountType}", 13f, Ui.MUTED))
+        status.addView(Ui.text(this, "Equity \$${prefs.equityUsd} · risk ${prefs.riskPercent}% · Exness ${prefs.accountType}", 13f, Ui.MUTED))
         val bad = SettingsCheck.problems(prefs.equityUsd, prefs.riskPercent, prefs.spreadPips, prefs.slippagePips)
         if (bad.isNotEmpty()) {
             status.addView(Ui.text(this, "⚠️ Settings ঠিক নেই, তাই কোনো লট দেখানো হবে না: " + bad.joinToString("; "), 14f, Ui.WATCH, bold = true))
         }
-        if (System.currentTimeMillis() < prefs.pausedUntilMs) {
+        if (now < prefs.pausedUntilMs) {
             status.addView(Ui.text(this, "⏸ অ্যালার্ট বন্ধ আছে", 14f, Ui.WATCH, bold = true))
         }
         if (!listener) {
@@ -57,7 +73,8 @@ class MainActivity : Activity() {
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             })
             status.addView(Ui.text(this,
-                "যদি \"Restricted setting\" দেখায়: Settings → Apps → AYESHA FX → ⋮ (উপরে ডানে) → Allow restricted settings, তারপর আবার চেষ্টা করুন।",
+                "এই অনুমতিতে অ্যাপ ফোনের নোটিফিকেশন দেখতে পায়, কিন্তু শুধু TradingView-এর AYESHA অ্যালার্ট রাখে; বাকি সব সাথে সাথে বাদ দেয়, কোথাও পাঠায় না। " +
+                    "\"Restricted setting\" দেখালে: Settings → Apps → AYESHA FX → ⋮ → Allow restricted settings।",
                 12f, Ui.MUTED))
         }
         if (!notif && Build.VERSION.SDK_INT >= 33) {
@@ -67,47 +84,81 @@ class MainActivity : Activity() {
         }
         col.addView(status)
 
+        // PC link health: the owner must be able to see when the PC scanner is off or its data is stale.
+        val link = Ui.card(this, if (!prefs.linkEnabled) Ui.OFF else Ui.SKY)
+        link.addView(Ui.text(this, "PC scanner লিংক", 13f, Ui.MUTED))
+        if (!prefs.linkEnabled) {
+            link.addView(Ui.text(this, "বন্ধ। চালু করতে Settings → PC link (ঐচ্ছিক)।", 14f))
+        } else {
+            val hbAge = now - prefs.hbRecvMs
+            val pcText = when {
+                prefs.hbRecvMs == 0L -> "⚠️ PC থেকে এখনো কিছু আসেনি"
+                prefs.hbState == "STOPPED" -> "⏹ PC scanner বন্ধ করা হয়েছে (${ago(prefs.hbRecvMs)})"
+                hbAge > 12 * 60_000L -> "⚠️ PC অফলাইন: শেষ খবর ${ago(prefs.hbRecvMs)}। এই সময়ে PC সিগন্যাল আসবে না।"
+                prefs.hbState == "OK" -> "✅ PC চলছে, ডেটা ঠিক আছে (${ago(prefs.hbRecvMs)})"
+                prefs.hbState == "TEST" -> "✅ PC test পাওয়া গেছে (${ago(prefs.hbRecvMs)})"
+                else -> "⚠️ PC চলছে কিন্তু ডেটা সমস্যা: ${prefs.hbState} (${ago(prefs.hbRecvMs)})"
+            }
+            link.addView(Ui.text(this, pcText, 15f))
+            link.addView(Ui.text(this, "ফোনের সংযোগ: ${prefs.linkState} · ${ago(prefs.linkStateMs)}", 12f, Ui.MUTED))
+            if (prefs.hbVersion.isNotBlank() && prefs.hbVersion != StrategyInfo.HASH) {
+                link.addView(Ui.text(this, "⚠️ PC আর অ্যাপের strategy version আলাদা (${prefs.hbVersion} ≠ ${StrategyInfo.HASH})। দুটোই আপডেট করুন; ততক্ষণ PC সিগন্যাল UNVERIFIED।", 13f, Ui.WATCH))
+            }
+        }
+        col.addView(link)
+
+        val diag = Ui.card(this, Ui.OFF)
+        diag.addView(Ui.text(this, "Diagnostics", 13f, Ui.MUTED))
+        diag.addView(Ui.text(this, "শেষ TradingView AYESHA নোটিফিকেশন: ${ago(prefs.lastTvSeenMs)}", 13f))
+        diag.addView(Ui.text(this, "বাতিল বার্তা: ${prefs.rejectedCount}" + (if (prefs.lastRejectReason.isNotBlank()) " (শেষ: ${prefs.lastRejectReason})" else ""), 13f))
+        diag.addView(Ui.text(this, "Strategy ${StrategyInfo.VERSION} #${StrategyInfo.HASH} · ${StrategyInfo.SETUP_TF}m · watchlist ${prefs.watchlist.sorted().joinToString(" ")}", 12f, Ui.MUTED))
+        col.addView(diag)
+
         col.addView(Ui.row(this,
             Ui.button(this, "⚙️ Settings") { startActivity(Intent(this, SettingsActivity::class.java)) },
             Ui.button(this, "🧪 Test alert", Ui.OFF) {
-                val now = System.currentTimeMillis()
-                AlertListener.handle(this, AlertParser.sample(now), now, isTest = true)
+                val t = System.currentTimeMillis()
+                AlertListener.handle(this, AlertParser.sample(t), t, isTest = true)
                 Toast.makeText(this, "Test alert পাঠানো হয়েছে", Toast.LENGTH_SHORT).show()
                 render()
             },
         ))
 
         val entries = AlertStore(this).all()
-        col.addView(Ui.text(this, "সিগন্যাল (${entries.size})", 18f, bold = true))
-        if (entries.isEmpty()) {
+        val judged = entries.map { it to Notifier.assess(this, it.alert, now) }
+        val active = judged.filter { it.second.actionable }
+        val archive = judged.filter { !it.second.actionable }
+        col.addView(Ui.row(this,
+            Ui.button(this, "সক্রিয় (${active.size})", if (!showArchive) Ui.SKY else Ui.OFF) { showArchive = false; render() },
+            Ui.button(this, "আর্কাইভ (${archive.size})", if (showArchive) Ui.SKY else Ui.OFF) { showArchive = true; render() },
+        ))
+        val list = if (showArchive) archive else active
+        if (list.isEmpty()) {
             col.addView(Ui.text(this,
-                "এখনো কোনো সিগন্যাল নেই। PC-তে TradingView-এ AYESHA indicator আর alert চালু থাকলে, সেটআপ পেলে এখানে আসবে। " +
-                    "কোনো দিন সিগন্যাল না আসাও স্বাভাবিক।", 14f, Ui.MUTED))
+                if (showArchive) "আর্কাইভ খালি। মেয়াদ শেষ, NO TRADE বা যাচাই না হওয়া সিগন্যাল এখানে কারণসহ থাকে।"
+                else "এখন কোনো সক্রিয় সিগন্যাল নেই। কোনো দিন সিগন্যাল না আসাও স্বাভাবিক।", 14f, Ui.MUTED))
         }
-        val now = System.currentTimeMillis()
-        for (e in entries) {
+        for ((e, v) in list) {
             val a = e.alert
-            val expired = a.isExpired(now)
-            val accent = when {
-                expired -> Ui.OFF
-                a.isBuy -> Ui.BULL
-                else -> Ui.BEAR
+            val accent = when (v.state) {
+                Assess.READY -> Ui.BULL
+                Assess.CHART_CANDIDATE -> if (a.isBuy) Ui.SKY else Ui.BEAR
+                Assess.NO_TRADE -> Ui.BEAR
+                else -> Ui.OFF
             }
             val card = Ui.card(this, accent)
             val icon = if (a.isBuy) "🟢" else "🔴"
-            card.addView(Ui.text(this, "$icon ${a.direction} ${a.ticker}" + (if (a.isTest) "  · TEST" else ""), 17f, bold = true))
+            card.addView(Ui.text(this, "$icon ${a.direction} ${a.ticker} · ${Notifier.stateLabel(v.state)}" +
+                (if (a.isPc) " · PC" else " · TV") + (if (a.isTest) " · TEST" else ""), 16f, bold = true))
             card.addView(Ui.text(this, "Entry ${a.fmt(a.entry)} · SL ${a.fmt(a.stop)} · TP ${a.fmt(a.target)}", 14f))
-            val lot = Notifier.lotFor(this, a)
-            card.addView(Ui.text(this, if (lot.ok) "চার্ট ক্যান্ডিডেট · Lot ${String.format(java.util.Locale.US, "%.2f", lot.lot)}" else Notifier.statusText(lot),
-                13f, if (lot.ok) Ui.SKY else Ui.WATCH))
+            if (!v.actionable) card.addView(Ui.text(this, v.reasons.joinToString("; "), 12f, Ui.WATCH))
             val time = DateFormat.format("dd MMM HH:mm", Date(a.signalTimeMs))
-            val state = when {
-                e.userStatus == "TAKEN" -> "ট্রেড নিয়েছি"
-                e.userStatus == "SKIPPED" -> "বাদ দিয়েছি"
-                expired -> "মেয়াদ শেষ"
-                else -> "সক্রিয়"
+            val user = when (e.userStatus) {
+                "TAKEN" -> " · ট্রেড নিয়েছি"
+                "SKIPPED" -> " · বাদ দিয়েছি"
+                else -> ""
             }
-            card.addView(Ui.text(this, "$time · ${a.source} sweep → MSS → FVG · $state", 12f, Ui.MUTED))
+            card.addView(Ui.text(this, "$time · ${a.source} sweep → MSS → FVG$user", 12f, Ui.MUTED))
             card.setOnClickListener {
                 startActivity(Intent(this, DetailActivity::class.java).putExtra(DetailActivity.EXTRA_ID, a.id))
             }
@@ -119,5 +170,14 @@ class MainActivity : Activity() {
                 render()
             })
         }
+        col.addView(Ui.text(this, String.format(Locale.US, "AYESHA FX %s · কখনো অর্ডার দেয় না", BuildConfigInfo.versionName(this)), 11f, Ui.MUTED))
+    }
+}
+
+object BuildConfigInfo {
+    fun versionName(a: Activity): String = try {
+        a.packageManager.getPackageInfo(a.packageName, 0).versionName ?: "?"
+    } catch (e: Exception) {
+        "?"
     }
 }

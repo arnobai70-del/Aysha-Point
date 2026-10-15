@@ -25,3 +25,15 @@ jobs:
       - name: Tests
         working-directory: desktop
         run: pytest -q
+
+  relay:
+    # Live check of the opt-in PC -> phone relay (ntfy.sh): publish signed, read back, verify.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml tzdata
+      - name: Relay round trip
+        run: python scripts/relay_roundtrip.py

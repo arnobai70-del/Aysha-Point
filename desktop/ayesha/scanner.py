@@ -43,6 +43,10 @@ class Scanner:
         self.last_bar: dict[str, datetime] = {}
         self.inst: dict[str, InstrumentSpec] = {}
         self.notify_grades = set(spec.get("delivery", {}).get("notify_grades", ["A_PLUS"]))
+        self.state: dict[str, str] = {}  # pair -> OK | DATA_STALE | FEED_OFFLINE
+        self.heartbeat_seconds = float(spec.get("delivery", {}).get("heartbeat_seconds", 300))
+        self._last_hb: datetime | None = None
+        self._last_overall = ""
 
     # --- setup -----------------------------------------------------------------------------
     def warmup(self) -> None:
@@ -61,8 +65,10 @@ class Scanner:
                 self.strats[sym] = strat
                 self.last_bar[sym] = bars[-1].time if bars else start
                 self.reg.health("WARMED_UP", sym, f"{len(bars)} bars")
+                self.state[sym] = "OK"
             except Exception as e:
                 self.reg.health("FEED_OFFLINE", sym, f"warmup: {type(e).__name__}: {e}")
+                self.state[sym] = "FEED_OFFLINE"
 
     def _closed(self, bars: list[Candle], now: datetime) -> list[Candle]:
         return [b for b in bars if b.time + self.tf <= now]
@@ -85,19 +91,53 @@ class Scanner:
                 stale = self.spec["feed"]["stale_after_bars"]
                 if self.sessions.market_open(now) and now - (self.last_bar[sym] + self.tf) > stale * self.tf:
                     self.reg.health("DATA_STALE", sym, f"last closed bar {self.last_bar[sym].isoformat()}")
+                    self.state[sym] = "DATA_STALE"
+                else:
+                    self.state[sym] = "OK"
             except Exception as e:
                 self.reg.health("FEED_OFFLINE", sym, f"{type(e).__name__}: {e}")
+                self.state[sym] = "FEED_OFFLINE"
+        self.heartbeat()
         return n
+
+    def overall_state(self) -> str:
+        vals = [self.state.get(p, "FEED_OFFLINE") for p in self.pairs]
+        for s in ("FEED_OFFLINE", "DATA_STALE"):
+            if s in vals:
+                return s
+        return "OK"
+
+    def heartbeat(self, force_state: str | None = None) -> None:
+        """Tell heartbeat-capable channels (the phone) that the PC is alive and whether data is fresh.
+        Sent every `heartbeat_seconds` and immediately when the overall state changes."""
+        now = self.clock()
+        state = force_state or self.overall_state()
+        due = self._last_hb is None or (now - self._last_hb).total_seconds() >= self.heartbeat_seconds
+        if not (due or state != self._last_overall or force_state):
+            return
+        for n in self.notifiers:
+            hb = getattr(n, "heartbeat", None)
+            if hb is None:
+                continue
+            try:
+                hb(int(now.timestamp() * 1000), state, len(self.pairs), self.spec["strategy_hash"])
+            except Exception:
+                pass
+        self._last_hb, self._last_overall = now, state
 
     def run(self, poll_seconds: float | None = None, max_loops: int | None = None) -> None:
         poll_seconds = poll_seconds or self.spec["feed"]["poll_seconds"]
         self.warmup()
         loops = 0
-        while max_loops is None or loops < max_loops:
-            self.poll()
-            loops += 1
-            if max_loops is None or loops < max_loops:
-                _time.sleep(poll_seconds)
+        try:
+            while max_loops is None or loops < max_loops:
+                self.poll()
+                loops += 1
+                if max_loops is None or loops < max_loops:
+                    _time.sleep(poll_seconds)
+        finally:
+            if max_loops is None:
+                self.heartbeat(force_state="STOPPED")  # phone shows "PC scanner stopped" at once
 
     # --- signal handling -------------------------------------------------------------------
     def _account_state(self) -> AccountState:
@@ -117,6 +157,13 @@ class Scanner:
             spread, age = q.spread, (now - q.time).total_seconds()
         except Exception:
             q, spread, age = None, sig.spread, float("inf")
+        floor = getattr(self.feed, "spread_floor", None)
+        if floor is not None:
+            spread = max(spread, floor(sym))  # data feed is not the broker: never assume a tighter spread
+        try:
+            self.inst[sym] = self.feed.instrument(sym)  # refresh USD conversion for JPY/cross pairs
+        except Exception:
+            pass
         news = "UNKNOWN"
         if self.calendar is not None:
             news, _ = self.calendar.status(sym, now)
@@ -141,8 +188,7 @@ class Scanner:
         rec = self._record(sig, d, spread, news, status, q)
         if not self.reg.insert_signal(rec):
             return None  # already known: never alert twice
-        if status == "READY":
-            self._deliver(rec)
+        self._deliver(rec)
         return rec
 
     def _record(self, sig: Signal, d: RiskDecision, spread: float, news: str, status: str,
@@ -179,13 +225,21 @@ class Scanner:
             "blockers": d.blockers,
             "min_lot_loss_usd": round(d.min_lot_loss_usd, 3),
             "rule_trace": sig.trace,
+            "liquidity_source": sig.liquidity_source,
+            "target_name": sig.target_name,
+            "data_source": getattr(self.feed, "source_name", "MT5"),
+            "contract_spec_source": inst.source,
             "expires_at_utc": (sig.bar_close_utc + self.tf * self.spec["entry"]["expiry_bars"]).isoformat(),
             "safe_to_alert_for_entry": status == "READY",
         }
 
     def _deliver(self, rec: dict[str, Any]) -> None:
+        """READY goes to every channel. Other statuses go only to channels that keep an archive
+        (the phone app shows them as 'not alerted, because ...'), never as an entry alert."""
         any_ok = False
         for n in self.notifiers:
+            if rec["status"] != "READY" and not getattr(n, "archive_non_ready", False):
+                continue
             if self.reg.was_delivered(rec["signal_id"], n.channel):
                 continue
             try:
@@ -194,7 +248,7 @@ class Scanner:
                 ok, detail = False, type(e).__name__
             self.reg.record_delivery(rec["signal_id"], n.channel, ok, detail)
             any_ok = any_ok or ok
-        if any_ok:
+        if any_ok and rec["status"] == "READY":
             self.reg.set_status(rec["signal_id"], "NOTIFIED")
 
     # --- lifecycle -------------------------------------------------------------------------

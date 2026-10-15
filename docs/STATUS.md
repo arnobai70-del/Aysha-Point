@@ -1,27 +1,39 @@
-# AYESHA FX: status (2026-10-15)
+# AYESHA FX: status (release 0.6.0, 2026-10-15)
 
-Plain answer to "what works today". **Implemented** = code exists. **Tested** = automated tests in CI.
-**Verified** = checked on the real platform (TradingView, a phone, the owner's broker). Nothing is verified yet.
+**Implemented** = code exists. **Tested (CI)** = automated tests on GitHub Actions. **Verified** = seen working on the
+real platform (TradingView account, a real phone, the owner's broker, real market data). Nothing below is verified on
+a real platform yet; those items are **PENDING OWNER DEVICE/AUTHORIZATION**.
+
+State: **demo/paper only, fail-closed. Not for real-money decisions.**
 
 | Part | Implemented | Tested (CI) | Verified on real platform |
 |---|---|---|---|
-| Pine indicator: sweep → MSS → FVG, ①–④ drawings, `alert()` payload | yes | generated from spec, parses, payload keys match the phone parser | **no**, not compiled in TradingView yet |
-| TradingView → phone push (Mode A) | yes | parser unit tests | **no**; Basic plan entitlement for `alert()` alerts unknown |
-| Android app: notification listener, inbox, detail, settings | yes | core logic: 16 JVM tests; APK builds in Actions | **no**, not run on a real phone |
-| Phone lot sizing (fail closed: RISK_UNVERIFIED / NO_TRADE) | yes | yes ($20/$25/$30, crosses, NaN, negatives) | no |
-| Desktop risk engine with all hard gates | yes | yes (70 Python tests) | no broker data yet |
-| Desktop rules + zero-lookahead replay backtester | yes | yes, on synthetic data | **no real-data backtest**; edge unknown |
-| Desktop scanner + SQLite + Telegram (Mode B) | yes | yes | needs a data feed (MT5 read-only today) |
-| News lockout | desktop only, needs a calendar file | yes | phone and Pine do **not** check news |
+| Mode B: PC scanner without MT5 (OANDA v20 data, bid/ask, quote age) | yes | fake-HTTP tests | **pending**: owner OANDA practice token |
+| Mode B: signed PC → phone push via ntfy.sh + heartbeat / offline state | yes | unit + **live relay round trip in CI** | **pending**: real phone |
+| Exness spec without MT5 (assumed → owner-confirmed) | yes | yes | **pending**: owner types values from the Exness app |
+| News gate: Forex Factory weekly export (cached) or CSV | yes | yes (fixtures) | pending first live fetch |
+| Risk engine, all hard gates, $20/25/30 Standard = NO_TRADE | yes | yes | no live Exness check |
+| Phone app: strict checks (BAR/ST/V/TF/watchlist/delay/signature), READY vs CHART_CANDIDATE vs NO_TRADE vs UNVERIFIED, archive | yes | 21 JVM tests | **pending**: Android 13 device |
+| Phone app: PC link service, diagnostics, watchlist, store lock + corrupt-file recovery | yes | build only (Android framework code) | **pending**: device |
+| Pine indicator (chart explanation ①–④, alerts only on 15m) | yes | generated from spec, parses, payload keys checked | **pending**: compile in TradingView |
+| Mode A: TradingView `alert()` → phone | yes | parser tests | **blocked on Basic**: official pricing lists no technical alerts on Basic |
+| Rules + zero-lookahead replay backtester | yes | synthetic data | **no real-data report yet** (`ayesha export --feed oanda` makes one possible) |
+| Python ↔ Pine behavior parity | no | no | no |
+| Python ↔ Kotlin wire-format parity | yes | shared fixture + signature vector | n/a |
 
-## What an alert means today
-Every phone alert is a **CHART_CANDIDATE**: the chart rules fired and RR ≥ 2 after an assumed spread. It is **not** a
-verified READY signal. News, the live Exness spread and the Exness contract spec are not checked; the app says so on
-every alert. The lot shown comes only from the owner's own settings; if it cannot be computed safely the app shows
-RISK_UNVERIFIED and does not notify.
+## What an alert means
+- **READY** only comes from the PC scanner, signed with the owner's pairing code, fresh, same strategy hash, and every
+  PC gate passed (feed fresh, spread within limit using the larger of feed and typical Exness spread, news clear,
+  owner-confirmed Exness spec, lot within budget). It is still advice, not permission: check price and spread in Exness.
+- **CHART_CANDIDATE** comes from TradingView only: chart rules fired; news, live spread, broker spec unchecked.
+- **NO_TRADE / UNVERIFIED / EXPIRED** never raise an entry notification; they sit in the archive with reasons.
 
-## Open items (owner needed)
-1. Try creating one AYESHA "Any alert() function call" alert on the TradingView account; report whether it is allowed.
-2. Add the indicator to a 15m chart and report any compile error.
-3. Install the APK, press "Test alert", then wait for a real alert.
-See [VERIFICATION.md](VERIFICATION.md) for the checklist and [DECISIONS.md](DECISIONS.md) for why things are this way.
+## Owner actions needed (in order)
+1. TradingView Basic: try one "AYESHA → Any alert() function call" alert; report allowed / upgrade asked (AT-01).
+2. Add the indicator to EURUSD 15m; report compile errors or a screenshot of ①–④ (AT-16).
+3. Install the APK on the Android 13 phone; grant notification access; press Test alert (AT-19).
+4. For the free path: OANDA practice token, `confirm-broker`, `pair`, `push-test`, then run the scanner
+   ([guide](08-pc-scanner-no-mt5.md)) (AT-02, AT-04, AT-05).
+5. Add the four `AYESHA_KEYSTORE_*` repository secrets so updates install without uninstalling (AT-23).
+
+See [VERIFICATION.md](VERIFICATION.md) for every acceptance test and [FEATURE_MATRIX.md](FEATURE_MATRIX.md) for rule coverage.

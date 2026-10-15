@@ -8,7 +8,8 @@
 ## ১. চার্টে indicator বসানো (একবারই)
 1. GitHub-এ `tradingview/AyeshaSmartMoney.pine` খুলে **Raw** চাপুন, সব কোড কপি করুন।
 2. TradingView → চার্টের নিচে **Pine Editor** → পুরনো কোড মুছে পেস্ট করুন → **Save** → **Add to chart**।
-3. চার্ট টাইমফ্রেম **15m** রাখুন।
+3. চার্ট টাইমফ্রেম **15m** রাখুন। অন্য টাইমফ্রেমে চার্টে আঁকা দেখা যাবে কিন্তু alert যাবে না (টেবিলে "Use 15m" লেখা আসবে)।
+   PC scanner OANDA-র দাম ব্যবহার করে, তাই চার্টেও **OANDA:EURUSD** এর মতো OANDA symbol খুললে মিল বেশি থাকবে (তবুও হুবহু মিলের নিশ্চয়তা নেই)।
 4. indicator-এর ⚙️ Settings → **Account & alerts** অংশে আপনার equity (USD), risk % আর account type (Standard / StandardCent) দিন।
    এখান থেকেই লট হিসাব হবে।
 
@@ -19,9 +20,10 @@
 4. প্রতিটা পেয়ারের জন্য আলাদা alert লাগবে (EURUSD, GBPUSD, USDJPY...)।
    ফ্রি প্ল্যানে কয়টা alert রাখা যায় আর কতদিন চলে, সেটা TradingView-এর সীমা। আপনার প্ল্যানে যতটা allow করে, ততগুলো পেয়ার দিয়ে শুরু করুন (EURUSD আর GBPUSD দিয়ে শুরু করা ভালো)।
 
-> **প্রথমে এটা পরীক্ষা করুন:** TradingView-এর ফ্রি (Basic) প্ল্যানে indicator-এর `alert()` দিয়ে alert বানানো যায় কিনা, সেটা এখনো নিশ্চিত না।
-> একটা পেয়ারে উপরের মতো একটা alert বানানোর চেষ্টা করুন। "Create" হলে সব ঠিক। প্ল্যান আপগ্রেড চাইলে বা অপশনটা না থাকলে জানাবেন,
-> তখন বিকল্প পথ (PC-তে AYESHA scanner চালিয়ে ফোনে push) লাগবে। দেখুন [DECISIONS.md](DECISIONS.md)।
+> **ফ্রি (Basic) প্ল্যানে সতর্কতা:** TradingView-এর pricing পাতায় Basic প্ল্যানে শুধু কয়েকটা price alert আছে, indicator-ভিত্তিক
+> "technical alert" নেই; `Any alert() function call` একটা technical alert। তাই ফ্রি প্ল্যানে এই ধাপ সম্ভবত কাজ করবে না।
+> একবার চেষ্টা করে ফলাফল ("হয়েছে" / "আপগ্রেড চাইছে") জানান। ফ্রি পথ হলো PC scanner: [08-pc-scanner-no-mt5.md](08-pc-scanner-no-mt5.md)।
+> Alert ছাড়াও indicator চার্টে ①–④ কারণ দেখানোর জন্য পুরোপুরি কাজের।
 >
 > **indicator আপডেট করলে:** নতুন কোড Save করার পর পুরনো AYESHA alert মুছে আবার নতুন করে বানান। পুরনো alert পুরনো কোডেই চলে।
 

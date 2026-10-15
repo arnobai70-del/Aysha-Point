@@ -77,3 +77,4 @@ feed:
 
 delivery:
   notify_grades: [A_PLUS]       # READY alerts only for these grades; WATCH is journal/quiet
+  heartbeat_seconds: 300        # PC -> phone "scanner alive" ping (also sent at once on state change)

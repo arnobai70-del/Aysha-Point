@@ -156,12 +156,13 @@ class CoreTest {
     @Test
     fun barTimeDrivesExpiryAndId() {
         val bar = t0 - 5 * 60_000L
-        val text = AlertParser.SAMPLE.replaceFirst(" V=test", " BAR=$bar V=test")
+        val text = AlertParser.SAMPLE.replaceFirst(" V=", " BAR=$bar V=")
         val a = AlertParser.parse(text, t0)!!
         assertEquals(bar, a.barCloseMs)
         assertEquals(bar + 8 * 15 * 60_000L, a.expiresAtMs)
         assertEquals(1.0, a.quoteUsd!!, 0.0)
         assertEquals(AyeshaAlert.CHART_CANDIDATE, a.status)
+        assertEquals("TV", a.origin)
         // the same bar pushed again 40 minutes later is still the same setup
         val late = AlertParser.parse(text, t0 + 40 * 60_000L)!!
         assertEquals(a.id, late.id)
@@ -171,18 +172,121 @@ class CoreTest {
         val tooLate = AlertParser.parse(text, bar + 3 * 3_600_000L)!!
         assertTrue(tooLate.isExpired(tooLate.receivedAtMs))
         // a different bar is a different setup
-        val next = AlertParser.parse(AlertParser.SAMPLE.replaceFirst(" V=test", " BAR=${bar + 900_000} V=test"), t0 + 900_000)!!
+        val next = AlertParser.parse(AlertParser.SAMPLE.replaceFirst(" V=", " BAR=${bar + 900_000} V="), t0 + 900_000)!!
         assertFalse(a.id == next.id)
     }
 
     @Test
     fun rejectsFutureBarAndNonFiniteLevels() {
-        val future = AlertParser.SAMPLE.replaceFirst(" V=test", " BAR=${t0 + 3_600_000} V=test")
+        val future = AlertParser.SAMPLE.replaceFirst(" V=", " BAR=${t0 + 3_600_000} V=")
         assertNull(AlertParser.parse(future, t0))
         assertNull(AlertParser.parse("AYESHA BUY OANDA:EURUSD TF=15 E=NaN SL=1.07 TP=1.10", t0))
         assertNull(AlertParser.parse("AYESHA BUY OANDA:EURUSD TF=15 E=Infinity SL=1.07 TP=1.10", t0))
         val noRate = AlertParser.parse("AYESHA BUY OANDA:EURJPY TF=15 E=162.0 SL=161.8 TP=163 QUSD=NA", t0)!!
         assertNull(noRate.quoteUsd)
         assertTrue(AlertParser.parse(AlertParser.sample(t0), t0)!!.hasBarTime)
+    }
+
+    // ---- signing (same vector as desktop/tests/test_no_mt5_path.py) ----
+    private val code = "ABCD-EFGH-JKMN-PQRS"
+
+    @Test
+    fun signatureMatchesPythonVector() {
+        val body = "AYESHA HB T=1760000000000 STATE=OK PAIRS=5 V=abc123def456"
+        assertEquals("be7e74e951d5dad03d7fce53f5d2d4d3", Signer.sign(code, body))
+        assertEquals(body, Signer.verify(code, body + "\nSIG=be7e74e951d5dad03d7fce53f5d2d4d3"))
+        assertNull(Signer.verify(code, body.replace("OK", "XX") + "\nSIG=be7e74e951d5dad03d7fce53f5d2d4d3"))
+        assertNull(Signer.verify("BBBB-EFGH-JKMN-PQRS", body + "\nSIG=be7e74e951d5dad03d7fce53f5d2d4d3"))
+        assertNull(Signer.verify(code, body))
+        assertNull(Signer.normalize("ABCD-0000-1111-IIII"))
+        assertEquals(31, Signer.topic(code)!!.length)
+        val hb = Heartbeat.parse(body)!!
+        assertEquals("OK", hb.state)
+        assertEquals(5, hb.pairs)
+    }
+
+    // ---- assessment ----
+    private val watch = StrategyInfo.PAIRS.toSet()
+    private val okLot = LotCalc.calc("EURUSD", 1.08120, 1.07940, 10_000.0, 0.5, "Standard", 0.8, 0.3)
+
+    private fun tv(extra: String = "", bar: Long? = t0 - 60_000, v: String = StrategyInfo.HASH, tf: String = "15"): AyeshaAlert {
+        val b = if (bar != null) " BAR=$bar" else ""
+        return AlertParser.parse("AYESHA BUY OANDA:EURUSD TF=$tf E=1.08120 SL=1.07940 TP=1.08610 RR=2.55 LOT=0.00 EXP=8 " +
+            "SRC=PDL TGT=ASIA_H$b QUSD=1 ST=CHART_CANDIDATE$extra V=$v", t0)!!
+    }
+
+    @Test
+    fun freshCurrentTvAlertIsChartCandidateOnly() {
+        val r = Assess.assess(tv(), t0, okLot, watch)
+        assertEquals(Assess.CHART_CANDIDATE, r.state)
+        assertTrue(r.actionable)
+    }
+
+    @Test
+    fun oldOrMalformedTvPayloadsAreUnverified() {
+        assertEquals(Assess.UNVERIFIED, Assess.assess(tv(bar = null), t0, okLot, watch).state)       // no BAR
+        assertEquals(Assess.UNVERIFIED, Assess.assess(tv(v = "deadbeef0000"), t0, okLot, watch).state) // other version
+        assertEquals(Assess.UNVERIFIED, Assess.assess(tv(tf = "5"), t0, okLot, watch).state)          // wrong chart TF
+        assertEquals(Assess.UNVERIFIED, Assess.assess(tv(), t0, okLot, setOf("GBPUSD")).state)       // not watched
+        val noSt = AlertParser.parse("AYESHA BUY OANDA:EURUSD TF=15 E=1.08120 SL=1.07940 TP=1.08610 RR=2.5 BAR=${t0 - 60_000} V=${StrategyInfo.HASH}", t0)!!
+        assertEquals(Assess.UNVERIFIED, Assess.assess(noSt, t0, okLot, watch).state)
+        // late push (more than one bar after the signal bar)
+        val late = AlertParser.parse(tv().raw, t0 + 30 * 60_000L)!!
+        assertEquals(Assess.UNVERIFIED, Assess.assess(late, t0 + 30 * 60_000L, okLot, watch).state)
+        // expired on arrival
+        val exp = AlertParser.parse(tv().raw, t0 + 3 * 3_600_000L)!!
+        assertEquals(Assess.EXPIRED, Assess.assess(exp, exp.receivedAtMs, okLot, watch).state)
+        // risk not computable / settings bad
+        val bad = LotCalc.calc("EURUSD", 1.08120, 1.07940, Double.NaN, 0.5, "Standard", 0.8, 0.3)
+        assertEquals(Assess.UNVERIFIED, Assess.assess(tv(), t0, bad, watch).state)
+        val small = LotCalc.calc("EURUSD", 1.08120, 1.07940, 25.0, 0.5, "Standard", 0.8, 0.3)
+        assertEquals(Assess.NO_TRADE, Assess.assess(tv(), t0, small, watch).state)
+        assertFalse(Assess.assess(tv(), t0, small, watch).actionable)
+    }
+
+    private fun pc(st: String = "READY", blk: String = "NONE"): String {
+        val bar = t0 - 60_000
+        return "AYESHA BUY OANDA:EURUSD TF=15 E=1.08120 SL=1.07940 TP=1.08610 RR=2.55 LOT=0.02 EXP=0 SRC=PDL TGT=ASIA_H " +
+            "BAR=$bar ST=$st FROM=PC ID=0123456789abcdef EXPU=${bar + 8 * 900_000} BLK=$blk V=${StrategyInfo.HASH}\nWhy: test"
+    }
+
+    @Test
+    fun pcMessagesNeedValidSignature() {
+        val body = pc()
+        val msg = body + "\nSIG=" + Signer.sign(code, body)
+        val verified = Signer.verify(code, msg)!!
+        val a = AlertParser.parse(verified, t0, signatureOk = true)!!
+        assertEquals("PC|0123456789abcdef", a.id)
+        assertEquals("Why: test", a.why)
+        assertEquals(Assess.READY, Assess.assess(a, t0, okLot, watch).state)
+        // the same text without a valid signature (e.g. copied into a TradingView alert) is never READY
+        val forged = AlertParser.parse(body, t0, signatureOk = false)!!
+        assertEquals(Assess.UNVERIFIED, Assess.assess(forged, t0, okLot, watch).state)
+        // PC said NO_TRADE: archive with the PC's reasons
+        val nt = AlertParser.parse(pc("NO_TRADE", "MIN_LOT_EXCEEDS_RISK,NEWS_UNVERIFIED"), t0, signatureOk = true)!!
+        val r = Assess.assess(nt, t0, okLot, watch)
+        assertEquals(Assess.NO_TRADE, r.state)
+        assertTrue(r.reasons.first().contains("MIN_LOT_EXCEEDS_RISK"))
+        assertEquals(listOf("MIN_LOT_EXCEEDS_RISK", "NEWS_UNVERIFIED"), nt.blockers)
+        // PC expiry is taken from EXPU
+        assertEquals(t0 - 60_000 + 8 * 900_000L, a.expiresAtMs)
+    }
+
+    @Test
+    fun parsesPythonGeneratedPcPush() {
+        // contracts/fixtures/pc-push-ready.txt is written by desktop/tests/test_no_mt5_path.py
+        val f = listOf("../../contracts/fixtures/pc-push-ready.txt", "../contracts/fixtures/pc-push-ready.txt",
+            "contracts/fixtures/pc-push-ready.txt").map { java.io.File(it) }.first { it.exists() }
+        val body = Signer.verify(code, f.readText())
+        assertNotNull("signature from Python must verify in Kotlin", body)
+        val a = AlertParser.parse(body!!, 1791969300000L + 60_000, signatureOk = true)!!
+        assertEquals("PC|0123456789abcdef", a.id)
+        assertEquals("READY", a.status)
+        assertEquals(1791976500000L, a.expiresAtMs)
+        assertEquals(1.0861, a.target, 1e-9)
+        assertEquals("FIXTUREHASH", a.version)
+        // the fixture's hash is not this build's strategy: correctly UNVERIFIED
+        assertEquals(Assess.UNVERIFIED, Assess.assess(a, a.receivedAtMs, okLot, watch).state)
+        assertEquals(Assess.READY, Assess.assess(a, a.receivedAtMs, okLot, watch, expectedHash = "FIXTUREHASH").state)
     }
 }

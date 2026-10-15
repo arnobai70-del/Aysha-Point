@@ -40,3 +40,7 @@ The custom Android app (phase 8) is next; it needs its own market-data source be
 - Phases 7, 8 wait for phase 3 results.
 
 See `CHANGELOG.md` for details. Checklist items in the master spec are only ticked with test evidence.
+
+## 2026-10-15 re-audit v2 (release 0.6.0)
+- Canonical live path is now Mode B: PC scanner on OANDA v20 data (no MT5) → signed ntfy.sh push → Android app. TradingView stays the chart explanation; its alerts are optional (Basic has no technical alerts).
+- Next, in order: owner device/account checks (docs/STATUS.md "Owner actions"), real-data backtest from `ayesha export --feed oanda` with a reserved out-of-sample period, then 30 days of demo forward logging. No new setups until that evidence exists.

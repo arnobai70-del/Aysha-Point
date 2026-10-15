@@ -44,6 +44,8 @@ class Signal:
     htf_bias: int
     trace: list[str] = field(default_factory=list)
     score_breakdown: dict[str, int] = field(default_factory=dict)
+    liquidity_source: str = ""  # swept level, e.g. PDL
+    target_name: str = ""       # target liquidity, e.g. ASIA_H
 
 
 @dataclass
@@ -217,7 +219,8 @@ class SweepMssFvg:
             "UNAVAILABLE: actual bank order locations / stop inventory",
         ]
         return Signal(sid, self.symbol, dname, self.SETUP, a.i, close_t, entry, stop, (target.price,), spread, atr,
-                      score, grade, a.i + self.entry_cfg["expiry_bars"], self.sessions.active(close_t), bias, trace, sb)
+                      score, grade, a.i + self.entry_cfg["expiry_bars"], self.sessions.active(close_t), bias, trace, sb,
+                      sw.level.name, target.name)
 
     def _score(self, sw: Sweep, br: StructureBreak, fvg: FVG, align: int, rr: float, spread: float,
                t: datetime) -> dict[str, int]:

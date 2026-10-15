@@ -2,6 +2,7 @@ package com.ayesha.fx
 
 import android.content.Context
 import com.ayesha.fx.core.AyeshaAlert
+import com.ayesha.fx.core.StrategyInfo
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -31,22 +32,82 @@ class Prefs(context: Context) {
     var pausedUntilMs: Long
         get() = p.getLong("pausedUntil", 0L)
         set(v) = p.edit().putLong("pausedUntil", v).apply()
+
+    /** Pairs the owner wants alerts for; anything else is archived. */
+    var watchlist: Set<String>
+        get() = p.getStringSet("watchlist", null)?.toSet() ?: StrategyInfo.PAIRS.toSet()
+        set(v) = p.edit().putStringSet("watchlist", v).apply()
+
+    // --- PC link (opt-in) -------------------------------------------------------------------
+    var pairingCode: String
+        get() = p.getString("pairingCode", "")!!
+        set(v) = p.edit().putString("pairingCode", v).apply()
+    var linkEnabled: Boolean
+        get() = p.getBoolean("linkEnabled", false)
+        set(v) = p.edit().putBoolean("linkEnabled", v).apply()
+    var linkLastId: String
+        get() = p.getString("linkLastId", "")!!
+        set(v) = p.edit().putString("linkLastId", v).apply()
+    var linkState: String
+        get() = p.getString("linkState", "OFF")!!
+        set(v) = p.edit().putString("linkState", v).apply()
+    var linkStateMs: Long
+        get() = p.getLong("linkStateMs", 0L)
+        set(v) = p.edit().putLong("linkStateMs", v).apply()
+    var hbPcMs: Long
+        get() = p.getLong("hbPcMs", 0L)
+        set(v) = p.edit().putLong("hbPcMs", v).apply()
+    var hbRecvMs: Long
+        get() = p.getLong("hbRecvMs", 0L)
+        set(v) = p.edit().putLong("hbRecvMs", v).apply()
+    var hbState: String
+        get() = p.getString("hbState", "")!!
+        set(v) = p.edit().putString("hbState", v).apply()
+    var hbVersion: String
+        get() = p.getString("hbVersion", "")!!
+        set(v) = p.edit().putString("hbVersion", v).apply()
+
+    // --- diagnostics ------------------------------------------------------------------------
+    var lastTvSeenMs: Long
+        get() = p.getLong("lastTvSeen", 0L)
+        set(v) = p.edit().putLong("lastTvSeen", v).apply()
+    var rejectedCount: Int
+        get() = p.getInt("rejected", 0)
+        set(v) = p.edit().putInt("rejected", v).apply()
+    var lastRejectReason: String
+        get() = p.getString("lastReject", "")!!
+        set(v) = p.edit().putString("lastReject", v).apply()
+
+    fun reject(reason: String) {
+        rejectedCount = rejectedCount + 1
+        lastRejectReason = reason
+    }
 }
 
 /** A stored alert plus what the owner did with it. */
 data class Entry(val alert: AyeshaAlert, var userStatus: String = "NEW", var resultUsd: Double? = null)
 
-/** Inbox stored as a small JSON file (last 300 alerts). History is never rewritten except user marks. */
+/**
+ * Inbox stored as a small JSON file (last 300 alerts). History is never rewritten except user marks.
+ * One process-wide lock covers every AlertStore instance (listener, link service and screens run on
+ * different threads). A file that cannot be read is moved aside, never silently overwritten.
+ */
 class AlertStore(context: Context) {
     private val file = File(context.filesDir, "alerts.json")
 
-    @Synchronized
-    fun all(): List<Entry> {
+    companion object {
+        private val LOCK = Any()
+    }
+
+    fun all(): List<Entry> = synchronized(LOCK) { readLocked() }
+
+    private fun readLocked(): List<Entry> {
         if (!file.exists()) return emptyList()
         return try {
             val arr = JSONArray(file.readText())
             (0 until arr.length()).mapNotNull { fromJson(arr.getJSONObject(it)) }
         } catch (e: Exception) {
+            file.renameTo(File(file.parentFile, "alerts.corrupt-${System.currentTimeMillis()}.json"))
             emptyList()
         }
     }
@@ -54,18 +115,16 @@ class AlertStore(context: Context) {
     fun get(id: String): Entry? = all().firstOrNull { it.alert.id == id }
 
     /** Returns false if this alert id is already stored (so it is never notified twice). */
-    @Synchronized
-    fun add(a: AyeshaAlert): Boolean {
-        val list = all().toMutableList()
+    fun add(a: AyeshaAlert): Boolean = synchronized(LOCK) {
+        val list = readLocked().toMutableList()
         if (list.any { it.alert.id == a.id }) return false
         list.add(0, Entry(a))
         save(list.take(300))
-        return true
+        true
     }
 
-    @Synchronized
-    fun mark(id: String, status: String, resultUsd: Double? = null) {
-        val list = all()
+    fun mark(id: String, status: String, resultUsd: Double? = null) = synchronized(LOCK) {
+        val list = readLocked()
         list.firstOrNull { it.alert.id == id }?.let {
             it.userStatus = status
             if (resultUsd != null) it.resultUsd = resultUsd
@@ -73,8 +132,7 @@ class AlertStore(context: Context) {
         save(list)
     }
 
-    @Synchronized
-    fun clearTests() = save(all().filter { !it.alert.isTest })
+    fun clearTests() = synchronized(LOCK) { save(readLocked().filter { !it.alert.isTest }) }
 
     private fun save(list: List<Entry>) {
         val arr = JSONArray()
@@ -93,7 +151,9 @@ class AlertStore(context: Context) {
             .put("targetName", a.targetName).put("version", a.version).put("why", a.why)
             .put("receivedAtMs", a.receivedAtMs).put("raw", a.raw).put("isTest", a.isTest)
             .put("barCloseMs", a.barCloseMs ?: JSONObject.NULL).put("quoteUsd", a.quoteUsd ?: JSONObject.NULL)
-            .put("status", a.status)
+            .put("status", a.status).put("origin", a.origin).put("signalId", a.signalId)
+            .put("expiresUtcMs", a.expiresUtcMs ?: JSONObject.NULL).put("blockers", JSONArray(a.blockers))
+            .put("signatureOk", a.signatureOk)
             .put("userStatus", e.userStatus).put("resultUsd", e.resultUsd ?: JSONObject.NULL)
     }
 
@@ -109,7 +169,12 @@ class AlertStore(context: Context) {
                 receivedAtMs = o.getLong("receivedAtMs"), raw = o.optString("raw"), isTest = o.optBoolean("isTest"),
                 barCloseMs = if (o.isNull("barCloseMs")) null else o.optLong("barCloseMs"),
                 quoteUsd = if (o.isNull("quoteUsd")) null else o.optDouble("quoteUsd").takeIf { it.isFinite() && it > 0 },
-                status = o.optString("status", AyeshaAlert.CHART_CANDIDATE),
+                status = o.optString("status", ""),
+                origin = o.optString("origin", "TV"),
+                signalId = o.optString("signalId", ""),
+                expiresUtcMs = if (o.isNull("expiresUtcMs") || !o.has("expiresUtcMs")) null else o.optLong("expiresUtcMs"),
+                blockers = o.optJSONArray("blockers")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } } ?: emptyList(),
+                signatureOk = o.optBoolean("signatureOk", false),
             ),
             userStatus = o.optString("userStatus", "NEW"),
             resultUsd = if (o.isNull("resultUsd")) null else o.optDouble("resultUsd"),

@@ -1,6 +1,6 @@
 //@version=6
 // AYESHA | Smart Money & ICT Compass  (chart helper, phase 6)
-// GENERATED from AyeshaSmartMoney.template.pine by scripts/generate_pine.py (strategy 0.2.0 #c6bbd8eb269f).
+// GENERATED from AyeshaSmartMoney.template.pine by scripts/generate_pine.py (strategy 0.2.0 #49a3e6b4bdec).
 // Do not edit AyeshaSmartMoney.pine directly; edit the template and regenerate.
 //
 // TradingView-first setup: this indicator finds SWEEP -> MSS -> FVG setups on TradingView's own
@@ -11,7 +11,11 @@ indicator("AYESHA | Smart Money & ICT Compass", shorttitle = "AYESHA", overlay =
      max_boxes_count = 100, max_lines_count = 200, max_labels_count = 200)
 
 STRATEGY_VERSION = "0.2.0"
-STRATEGY_HASH = "c6bbd8eb269f"
+STRATEGY_HASH = "49a3e6b4bdec"
+SETUP_TF = "15"
+// The rules are defined for one chart timeframe. On any other timeframe the drawings still help
+// you read the chart, but no alert is sent (the phone app would reject it anyway).
+tfOk = timeframe.period == SETUP_TF
 
 // ---------------------------------------------------------------- inputs
 grpQ = "Quick"
@@ -409,7 +413,7 @@ if barstate.isconfirmed
         else
             [st, msg, ok] = buildPlan(1, armedBullBar, armedBullExt, armedBullName)
             setupState := st
-            if msg != "" and (ok or alertNoTrade)
+            if msg != "" and (ok or alertNoTrade) and tfOk
                 alert(msg, alert.freq_once_per_bar_close)
         armedBullBar := na
     if bearBreak and not na(armedBearBar)
@@ -420,7 +424,7 @@ if barstate.isconfirmed
         else
             [st, msg, ok] = buildPlan(-1, armedBearBar, armedBearExt, armedBearName)
             setupState := st
-            if msg != "" and (ok or alertNoTrade)
+            if msg != "" and (ok or alertNoTrade) and tfOk
                 alert(msg, alert.freq_once_per_bar_close)
         armedBearBar := na
     for p in plans
@@ -455,7 +459,7 @@ htfConfirmed() =>
 bias = request.security(syminfo.tickerid, "60", htfConfirmed(), lookahead = barmerge.lookahead_on)
 
 // ---------------------------------------------------------------- status table
-var table tb = table.new(position.top_right, 2, 7, bgcolor = color.new(color.black, 35), border_width = 1)
+var table tb = table.new(position.top_right, 2, 8, bgcolor = color.new(color.black, 35), border_width = 1)
 if barstate.islast
     sessTxt = londonNow and nyNow ? "LDN+NY" : londonNow ? "LONDON" : nyNow ? "NEW YORK" : tokyoNow ? "TOKYO" : "OFF"
     table.cell(tb, 0, 0, "PAIR", text_color = color.silver, text_size = size.small)
@@ -472,3 +476,5 @@ if barstate.islast
     table.cell(tb, 1, 5, STRATEGY_VERSION + " #" + STRATEGY_HASH, text_color = color.white, text_size = size.small)
     table.cell(tb, 0, 6, "TV FEED", text_color = color.silver, text_size = size.small)
     table.cell(tb, 1, 6, syminfo.prefix, text_color = color.white, text_size = size.small)
+    table.cell(tb, 0, 7, "TIMEFRAME", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 7, tfOk ? timeframe.period + "m OK" : "Use " + SETUP_TF + "m (alerts off)", text_color = tfOk ? color.white : colBear, text_size = size.small)

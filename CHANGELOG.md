@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0 — 2026-10-15 (re-audit v2: free, MT5-free signal path)
+- PC scanner runs without MT5: `--feed oanda` (OANDA v20 practice API, bid/ask candles, quote age). `export --feed oanda` gives real history for backtests.
+- Exness spec without MT5: repo assumption until the owner confirms it from the Exness app (`ayesha confirm-broker`); READY is impossible before that.
+- News gate from the Forex Factory weekly export (`--news-ff`, cached hourly; stale ⇒ NEWS_UNVERIFIED).
+- Signed PC → phone push through ntfy.sh (`--push`, `ayesha pair`, `ayesha push-test`), heartbeat every 5 min and on state change, STOPPED on exit. Non-READY records are sent as archive-only so the phone can show why.
+- Spread gate uses max(feed spread, typical Exness spread).
+- Android 0.3.0: PC link service, READY / CHART_CANDIDATE / NO_TRADE / UNVERIFIED / EXPIRED with reasons, active and archive inbox, watchlist, diagnostics (PC offline/stale, last TradingView alert, rejected messages), strict BAR/ST/V/TF/delay/signature checks, process-wide store lock and corrupt-file recovery.
+- Pine: alerts only on the 15m setup timeframe; table shows a timeframe warning. App `StrategyInfo` generated from the spec alongside the Pine file.
+- CI: live relay round-trip job; Python↔Kotlin signature vector and wire-format fixture; version manifest test; OANDA write endpoints added to the no-order scan. Release notes carry commit, strategy hash, APK SHA-256 and signer.
+
 ## 0.5.0 — 2026-10-15 (audit P0 fixes)
 - Phone app 0.2.0: lot sizing fails closed (RISK_UNVERIFIED for unknown instruments, missing USD rate or bad settings); the chart's lot is never used as a fallback. Settings are validated before saving.
 - Every alert is labelled CHART_CANDIDATE with the unverified checks (news, live spread, broker spec) listed in the app.

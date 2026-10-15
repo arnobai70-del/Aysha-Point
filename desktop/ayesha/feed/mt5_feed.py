@@ -47,6 +47,7 @@ class MT5ReadOnlyFeed:
         self.mt5 = _MT5(module)
         self._aliases: dict[str, str] = {}
         self._offset = timedelta(hours=server_utc_offset_hours)
+        self.source_name = "MT5"
 
     # --- lifecycle -------------------------------------------------------------------------
     def connect(self) -> dict[str, Any]:

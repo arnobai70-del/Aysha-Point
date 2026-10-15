@@ -9,6 +9,8 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.Toast
 import com.ayesha.fx.core.SettingsCheck
+import com.ayesha.fx.core.Signer
+import com.ayesha.fx.core.StrategyInfo
 
 /** Capital & risk settings (spec O6). Risk is capped at 1% per trade. */
 class SettingsActivity : Activity() {
@@ -35,8 +37,8 @@ class SettingsActivity : Activity() {
 
         col.addView(Ui.text(this, "Exness account type", 13f, Ui.MUTED))
         val group = RadioGroup(this)
-        val std = RadioButton(this).apply { text = "Standard (1 lot = 100,000)"; setTextColor(Ui.TEXT); id = 101 }
-        val cent = RadioButton(this).apply { text = "Standard Cent (1 lot = 1,000)"; setTextColor(Ui.TEXT); id = 102 }
+        val std = RadioButton(this).apply { text = "Exness Standard, USD (1 lot = 100,000)"; setTextColor(Ui.TEXT); id = 101 }
+        val cent = RadioButton(this).apply { text = "Exness Standard Cent, USC (1 lot = 1,000)"; setTextColor(Ui.TEXT); id = 102 }
         group.addView(std)
         group.addView(cent)
         group.check(if (p.accountType == "StandardCent") 102 else 101)
@@ -48,6 +50,33 @@ class SettingsActivity : Activity() {
             isChecked = p.alertNoTrade
         }
         col.addView(noTrade)
+
+        col.addView(Ui.text(this, "Watchlist (এর বাইরের পেয়ারের অ্যালার্ট শুধু আর্কাইভে যাবে)", 13f, Ui.MUTED))
+        val watchBoxes = StrategyInfo.PAIRS.map { pair ->
+            CheckBox(this).apply {
+                text = pair
+                setTextColor(Ui.TEXT)
+                isChecked = pair in p.watchlist
+            }.also { col.addView(it) }
+        }
+
+        col.addView(Ui.text(this, "PC link (ঐচ্ছিক): PC-তে `ayesha pair` চালিয়ে যে কোড দেখায় সেটা লিখুন", 13f, Ui.MUTED))
+        val code = EditText(this).apply {
+            setText(p.pairingCode)
+            hint = "ABCD-EFGH-JKMN-PQRS"
+            setTextColor(Ui.TEXT)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+        }
+        col.addView(code)
+        val link = CheckBox(this).apply {
+            text = "PC scanner থেকে সিগন্যাল নাও (ntfy.sh relay দিয়ে)"
+            setTextColor(Ui.TEXT)
+            isChecked = p.linkEnabled
+        }
+        col.addView(link)
+        col.addView(Ui.text(this,
+            "চালু করলে ফোন ntfy.sh নামের একটা ফ্রি পাবলিক relay সার্ভারের সাথে যুক্ত থাকে। সেখানে শুধু সিগন্যাল যায় (পেয়ার, লেভেল, অবস্থা), " +
+                "কোনো লগইন, ব্যালান্স বা পাসওয়ার্ড না। প্রতিটা বার্তা আপনার কোড দিয়ে সই করা; ভুল সই হলে বাদ। ফোন কিছু পাঠায় না।", 12f, Ui.MUTED))
 
         col.addView(Ui.button(this, "💾 Save", Ui.BULL) {
             val eq = equity.text.toString().trim().toDoubleOrNull() ?: Double.NaN
@@ -63,8 +92,24 @@ class SettingsActivity : Activity() {
             p.riskPercent = rk
             p.spreadPips = sp
             p.slippagePips = sl
+            val wantLink = link.isChecked
+            val norm = Signer.normalize(code.text.toString())
+            if (wantLink && norm == null) {
+                Toast.makeText(this, "Pairing code ১৬ অক্ষরের হতে হবে (যেমন ABCD-EFGH-JKMN-PQRS)", Toast.LENGTH_LONG).show()
+                return@button
+            }
+            val chosen = watchBoxes.filter { it.isChecked }.map { it.text.toString() }.toSet()
+            if (chosen.isEmpty()) {
+                Toast.makeText(this, "অন্তত একটা পেয়ার বাছুন", Toast.LENGTH_LONG).show()
+                return@button
+            }
+            p.watchlist = chosen
             p.accountType = if (group.checkedRadioButtonId == 102) "StandardCent" else "Standard"
             p.alertNoTrade = noTrade.isChecked
+            if (norm != null && norm != Signer.normalize(p.pairingCode)) p.linkLastId = ""
+            p.pairingCode = norm ?: code.text.toString().trim()
+            p.linkEnabled = wantLink
+            if (wantLink) LinkService.start(this) else LinkService.stop(this)
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
             finish()
         })
