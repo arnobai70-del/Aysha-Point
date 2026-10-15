@@ -19,13 +19,16 @@ def run_doctor(*, account_type: str = "Standard", oanda_env: str = "practice", p
                env: dict[str, str] | None = None, home: Path | None = None,
                make_feed: Callable[..., Any] | None = None, make_calendar: Callable[[Path], Any] | None = None,
                make_notifier: Callable[[str], Any] | None = None,
-               clock: Callable[[], datetime] | None = None) -> list[Row]:
+               clock: Callable[[], datetime] | None = None, store=True) -> list[Row]:
     from ayesha.broker import load_confirmed
     from ayesha.config import load_spec
     from ayesha.delivery.push import normalize_code, topic_for
 
     env = os.environ if env is None else env
-    home = home or Path.home() / "AyeshaFX"
+    if home is None:
+        from ayesha.paths import home as _home
+
+        home = _home()
     clock = clock or (lambda: datetime.now(timezone.utc))
     rows: list[Row] = []
 
@@ -39,9 +42,15 @@ def run_doctor(*, account_type: str = "Standard", oanda_env: str = "practice", p
         rows.append((False, "Strategy contract", f"cannot load: {type(e).__name__}"))
         return rows
 
-    token = env.get("AYESHA_OANDA_TOKEN", "")
-    rows.append((bool(token), "OANDA token", "set (value hidden)" if token else
-                 "missing: run install.bat again or `setx AYESHA_OANDA_TOKEN <token>` and reopen the window"))
+    from ayesha.credentials import get_token, valid_token
+
+    token = get_token(env, store=store)
+    if not token:
+        rows.append((False, "OANDA token", "missing: run install.bat again (or `ayesha set-token`)"))
+    elif not valid_token(token):
+        rows.append((False, "OANDA token", "set but malformed (spaces or wrong characters?): run `ayesha set-token` again"))
+    else:
+        rows.append((True, "OANDA token", f"set ({len(token)} characters, value hidden)"))
     if token:
         try:
             if make_feed is None:
@@ -55,7 +64,9 @@ def run_doctor(*, account_type: str = "Standard", oanda_env: str = "practice", p
             rows.append((True, "OANDA prices", f"EURUSD bid {q.bid} ask {q.ask}, quote age {age:.0f}s"
                          + (" (market closed or weekend?)" if age > 120 else "")))
         except Exception as e:
-            rows.append((False, "OANDA prices", f"{type(e).__name__}: {str(e)[:120]}"))
+            from ayesha.credentials import redact
+
+            rows.append((False, "OANDA prices", redact(f"{type(e).__name__}: {str(e)[:160]}", token)))
 
     conf = load_confirmed(account_type, home / "broker-confirmed.json")
     rows.append((conf is not None, "Exness contract", "owner-confirmed" if conf else

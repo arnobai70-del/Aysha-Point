@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import time as _time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -60,6 +61,14 @@ def _rfc3339(t: datetime) -> str:
     return t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+class MissingToken(RuntimeError):
+    pass
+
+
+class AuthRejected(RuntimeError):
+    """OANDA refused the token (HTTP 401/403). Retrying will not help."""
+
+
 class OandaFeed:
     """Implements the scanner `Feed` protocol without MT5.
 
@@ -70,9 +79,13 @@ class OandaFeed:
     def __init__(self, equity_usd: float, account_type: str = "Standard", token: str | None = None,
                  environment: str = "practice", http_get: HttpGet | None = None,
                  clock: Callable[[], datetime] | None = None, confirm_path=None, min_interval_s: float = 0.2) -> None:
-        self.token = token if token is not None else os.environ.get("AYESHA_OANDA_TOKEN", "")
+        if token is None:
+            from ayesha.credentials import get_token
+
+            token = get_token()
+        self.token = token
         if not self.token:
-            raise RuntimeError("Set AYESHA_OANDA_TOKEN (OANDA fxTrade Practice personal access token)")
+            raise MissingToken("No OANDA token: run install.bat (or `ayesha set-token`)")
         if environment not in HOSTS:
             raise ValueError(f"environment must be one of {sorted(HOSTS)}")
         if not (equity_usd > 0):
@@ -94,7 +107,12 @@ class OandaFeed:
             _time.sleep(wait)  # stay far below OANDA's documented rate limits
         self._last_call = _time.monotonic()
         url = f"{self.host}{path}?{urllib.parse.urlencode(params)}"
-        return self._get(url, {"Authorization": f"Bearer {self.token}", "Accept-Datetime-Format": "RFC3339"})
+        try:
+            return self._get(url, {"Authorization": f"Bearer {self.token}", "Accept-Datetime-Format": "RFC3339"})
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                raise AuthRejected(f"OANDA rejected the token (HTTP {e.code}); check it or create a new one") from None
+            raise RuntimeError(f"OANDA HTTP {e.code}") from None
 
     # --- Feed protocol ---------------------------------------------------------------------
     def account(self) -> dict[str, Any]:

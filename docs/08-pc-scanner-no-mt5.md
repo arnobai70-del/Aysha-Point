@@ -27,7 +27,8 @@ OANDA demo API (দাম, bid/ask) ─► PC scanner (নিয়ম + সব 
    - এটা OANDA-র অফিসিয়াল API। কোনো scraping নয়। OANDA-র শর্ত (ব্যক্তিগত ব্যবহার, rate limit) মেনে চলে।
    - আপনার দেশে OANDA ডেমো খোলা না গেলে জানাবেন; তখন অন্য অনুমোদিত ডেটা উৎস বা MT5 (ঐচ্ছিক) লাগবে।
 3. টোকেন Windows-এ একবার সেট করুন (Command Prompt):
-   `setx AYESHA_OANDA_TOKEN "আপনার-টোকেন"` — টোকেন কখনো GitHub-এ বা কাউকে দেবেন না।
+   `python -m ayesha.cli set-token` (desktop ফোল্ডারে) — টোকেন লুকিয়ে টাইপ হয়, শুধু আপনার Windows user settings-এ থাকে।
+   টোকেন কখনো GitHub-এ বা কাউকে দেবেন না। পুরো পরীক্ষার ধাপ: [10-owner-testing-guide.md](10-owner-testing-guide.md)।
 4. রেপো ডাউনলোড: GitHub → Code → Download ZIP (বা git clone), তারপর `desktop` ফোল্ডারে:
    `pip install -e .`
 

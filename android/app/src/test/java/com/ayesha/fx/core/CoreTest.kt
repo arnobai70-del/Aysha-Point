@@ -390,4 +390,30 @@ class CoreTest {
         assertNull(Journal.parseUsd("abc"))
         assertNull(Journal.parseUsd("NaN"))
     }
+
+    @Test
+    fun backupRestoreNeverLosesATypedResult() {
+        val none = Backup.Mark("NEW", null, null)
+        val taken = Backup.Mark("TAKEN", null, null)
+        val closed = Backup.Mark("TAKEN", -0.10, 100L)
+        val newer = Backup.Mark("TAKEN", 0.25, 200L)
+        assertTrue(Backup.preferIncoming(none, taken))
+        assertFalse(Backup.preferIncoming(taken, none))
+        assertTrue(Backup.preferIncoming(taken, closed))
+        assertFalse(Backup.preferIncoming(closed, taken))     // an older backup cannot erase a result
+        assertTrue(Backup.preferIncoming(closed, newer))
+        assertFalse(Backup.preferIncoming(newer, closed))
+        assertFalse(Backup.preferIncoming(closed, closed))
+    }
+
+    @Test
+    fun inboxLimitNeverDropsJournalTrades() {
+        // newest first; every 10th is a journal trade, the oldest ones included
+        val items = (0 until 1000).map { it to (it % 10 == 0) }
+        val kept = Backup.retain(items, { it.second }, 300)
+        assertEquals(100, kept.count { it.second })              // all 100 journal trades kept
+        assertEquals(300, kept.count { !it.second })             // newest 300 others
+        assertTrue(kept.filter { !it.second }.all { it.first < 334 })
+        assertTrue(kept.any { it.first == 990 })                 // the oldest journal trade survives
+    }
 }

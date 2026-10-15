@@ -2,7 +2,7 @@ name: build-android
 on:
   push:
     branches: [main]
-    paths: ["android/**", "contracts/**", ".github/workflows/build-android.yml"]
+    paths: ["android/**", "contracts/**", "desktop/ayesha/signing.py", ".github/workflows/build-android.yml"]
   workflow_dispatch:
 
 permissions:
@@ -22,6 +22,9 @@ jobs:
           echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           ls "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms" || true
           echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > android/local.properties
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
@@ -30,8 +33,8 @@ jobs:
           KS_B64: ${{ secrets.AYESHA_KEYSTORE_BASE64 }}
         run: |
           if [ -n "$KS_B64" ]; then
-            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/ayesha.jks"
-            echo "AYESHA_KEYSTORE=$RUNNER_TEMP/ayesha.jks" >> "$GITHUB_ENV"
+            printf '%s' "$KS_B64" | base64 -d > "$RUNNER_TEMP/ayesha.keystore"
+            echo "AYESHA_KEYSTORE=$RUNNER_TEMP/ayesha.keystore" >> "$GITHUB_ENV"
           fi
       - name: Unit tests and APK
         env:
@@ -49,7 +52,27 @@ jobs:
           echo "VN=$VN" >> "$GITHUB_ENV"
           echo "STRATEGY_HASH=$HASH" >> "$GITHUB_ENV"
           echo "APK_SHA=$(cut -d' ' -f1 ayesha-fx.apk.sha256)" >> "$GITHUB_ENV"
-          if [ -n "$AYESHA_KEYSTORE" ]; then echo "SIGNING=release key" >> "$GITHUB_ENV"; else echo "SIGNING=CI debug key (updates need uninstall until a release key is configured)" >> "$GITHUB_ENV"; fi
+          if [ -n "$AYESHA_KEYSTORE" ]; then echo "SIGNING=owner release key (updates keep app data)" >> "$GITHUB_ENV"; else echo "SIGNING=CI debug key (each update needs uninstall; back up the journal first)" >> "$GITHUB_ENV"; fi
+          APKSIGNER=$(ls -d "${ANDROID_HOME:-$ANDROID_SDK_ROOT}"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs ayesha-fx.apk | tee signer.txt
+          echo "SIGNER_SHA=$(sed -n 's/.*certificate SHA-256 digest: //p' signer.txt | head -1)" >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/ayesha.keystore"
+      - name: Signing self-test (throwaway PKCS12 key from `ayesha make-signing-key`, never published)
+        run: |
+          pip install --disable-pip-version-check -q -e "desktop[signing]"
+          python -m ayesha.cli make-signing-key --out-dir "$RUNNER_TEMP/selftest" > /dev/null
+          F="$RUNNER_TEMP/selftest/github-secrets-DELETE-AFTER-USE.txt"
+          PW=$(sed -n '/^AYESHA_KEYSTORE_PASSWORD$/{n;p;}' "$F")
+          echo "::add-mask::$PW"
+          WANT=$(tail -1 "$F")
+          AYESHA_KEYSTORE="$RUNNER_TEMP/selftest/ayesha-release.p12" AYESHA_KEYSTORE_PASSWORD="$PW" \
+            AYESHA_KEY_ALIAS=ayesha AYESHA_KEY_PASSWORD="$PW" VERSION_CODE=1 \
+            gradle -p android --no-daemon -q assembleRelease
+          APKSIGNER=$(ls -d "${ANDROID_HOME:-$ANDROID_SDK_ROOT}"/build-tools/*/apksigner | sort -V | tail -1)
+          GOT=$("$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk | sed -n 's/.*certificate SHA-256 digest: //p' | head -1)
+          echo "want $WANT"; echo "got  $GOT"
+          [ "$GOT" = "$WANT" ]
+          rm -rf "$RUNNER_TEMP/selftest"
       - uses: actions/upload-artifact@v4
         with:
           name: ayesha-fx-apk
@@ -71,6 +94,7 @@ jobs:
             - Strategy hash: ${{ env.STRATEGY_HASH }}
             - APK SHA-256: ${{ env.APK_SHA }}
             - Signed with: ${{ env.SIGNING }}
+            - Signer certificate SHA-256: ${{ env.SIGNER_SHA }} (must stay the same between releases for updates to keep your data)
             - Verification: unit tests + build only. NOT yet tested on a real Android 13 phone (see docs/VERIFICATION.md).
           files: |
             ayesha-fx.apk

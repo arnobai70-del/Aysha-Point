@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ayesha-fx"
-version = "0.7.0"
+version = "0.7.1"
 description = "AYESHA FX: advisory-only ICT/SMC forex scanner, risk engine and replay backtester (no order execution)"
 requires-python = ">=3.11"
 dependencies = [
@@ -14,7 +14,8 @@ dependencies = [
 
 [project.optional-dependencies]
 mt5 = ["MetaTrader5>=5.0.45; platform_system == 'Windows'"]
-dev = ["pytest>=8", "hypothesis>=6"]
+dev = ["pytest>=8", "hypothesis>=6", "cryptography>=42"]
+signing = ["cryptography>=42"]
 
 [project.scripts]
 ayesha = "ayesha.cli:main"

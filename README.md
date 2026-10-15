@@ -22,6 +22,9 @@ Guide (বাংলা): [`docs/08-pc-scanner-no-mt5.md`](docs/08-pc-scanner-no-
 2. Windows PC: double-click `desktop\windows\install.bat` once (token, equity, Exness contract, pairing, health check).
 3. Daily: `desktop\windows\start-ayesha.bat` (`ayesha scan --feed oanda --equity <yours> --news-ff --push`, restarts itself). `ayesha doctor` shows what is missing.
 
+Owner test guide (বাংলা, PC + TradingView Basic + Android 13): [`docs/10-owner-testing-guide.md`](docs/10-owner-testing-guide.md). Security: [`docs/SECURITY.md`](docs/SECURITY.md).
+Real-data report without putting the token in GitHub: `desktop\windows\backtest-local.bat`.
+
 Multi-timeframe and backtest guide (বাংলা): [`docs/09-mtf-and-backtest.md`](docs/09-mtf-and-backtest.md). Checklist: [`docs/MASTER_CHECKLIST.md`](docs/MASTER_CHECKLIST.md).
 
 **Chart:** copy [`tradingview/AyeshaSmartMoney.pine`](tradingview/AyeshaSmartMoney.pine) into TradingView (15m) to see ①–④ on the chart.
@@ -41,6 +44,9 @@ TradingView-to-phone alerts (Mode A) need a plan with technical alerts; Basic li
 | `ayesha backtest --csv eurusd_m15.csv --symbol EURUSD --equity 20 --split 2025-07-01` | Bar-by-bar replay of the SWEEP_MSS_FVG setup, results in R after spread | No |
 | `ayesha report --data-dir data --split 2025-01-01 --label "..." --md report.md` | Validation report: pairs × modes, IS/OOS, walk-forward, breakdowns, $20–30 feasibility | No |
 | `ayesha doctor` | Health check: token, OANDA prices, Exness contract, pairing, calendar, relay | No |
+| `ayesha setup` / `ayesha set-token` | One-time setup (used by install.bat); token typed hidden, stored in the Windows user environment | No |
+| `ayesha backtest-run --pairs EURUSD --days 1095` | Validated OANDA export (M15 + M5) + validation report | No |
+| `ayesha make-signing-key` | Stable Android release key (PKCS#12) and the four GitHub secret values | No |
 
 ## Layout
 

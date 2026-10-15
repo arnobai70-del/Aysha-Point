@@ -23,7 +23,9 @@ FIELDS = ("contract_size", "volume_min", "volume_step", "volume_max")
 
 
 def default_confirm_path() -> Path:
-    return Path.home() / "AyeshaFX" / "broker-confirmed.json"
+    from ayesha.paths import home
+
+    return home() / "broker-confirmed.json"
 
 
 def load_assumed(account_type: str, path: Path = BROKER_FILE) -> dict[str, Any]:

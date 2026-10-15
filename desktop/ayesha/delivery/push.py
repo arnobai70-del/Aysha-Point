@@ -150,7 +150,9 @@ class NtfyNotifier:
 
 
 def default_code_path() -> Path:
-    return Path.home() / "AyeshaFX" / "pairing-code.txt"
+    from ayesha.paths import home
+
+    return home() / "pairing-code.txt"
 
 
 def load_or_create_code(path: Path | None = None) -> str:

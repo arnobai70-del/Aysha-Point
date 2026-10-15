@@ -36,7 +36,7 @@ def _names(rows, ok):
 
 
 def test_doctor_reports_every_missing_piece(tmp_path):
-    rows = run_doctor(env={}, home=tmp_path, make_calendar=lambda p: None, publish=True, clock=lambda: NOW)
+    rows = run_doctor(env={}, home=tmp_path, make_calendar=lambda p: None, publish=True, clock=lambda: NOW, store=False)
     bad = _names(rows, False)
     assert {"OANDA token", "Exness contract", "Pairing code", "News calendar"} <= bad
     assert "OANDA prices" not in _names(rows, True)
@@ -52,7 +52,7 @@ def test_doctor_all_green_with_fakes(tmp_path):
     (tmp_path / "pairing-code.txt").write_text(new_pairing_code(), encoding="utf-8")
     cal = NewsCalendar([], NOW - timedelta(days=1), NOW + timedelta(days=3))
     rows = run_doctor(env={"AYESHA_OANDA_TOKEN": "x" * 20}, home=tmp_path, make_feed=_Feed,
-                      make_calendar=lambda p: cal, make_notifier=_Notifier, clock=lambda: NOW)
+                      make_calendar=lambda p: cal, make_notifier=_Notifier, clock=lambda: NOW, store=False)
     assert all(ok for ok, _, _ in rows), rows
     assert _Notifier.sent and _Notifier.sent[-1][1] == "TEST"
     assert not any("x" * 20 in d for _, _, d in rows), "token value must never be printed"
@@ -94,9 +94,236 @@ def test_windows_scripts_call_valid_commands():
             m = re.search(r"-m ayesha\.cli (.+)$", line)
             if not m:
                 continue
-            args = shlex.split(m.group(1).replace("%EQ%", "25"))
+            args = shlex.split(m.group(1).replace("%EQ%", "25").replace("%*", "").replace("%~dp0", "x/"))
             parser.parse_args(args)
             seen += 1
-    assert seen >= 4
+    assert seen >= 3  # setup, scan, backtest-run
     txt = (win / "install.bat").read_text(encoding="utf-8")
-    assert "AsSecureString" in txt and "setx AYESHA_OANDA_TOKEN" in txt  # token typed hidden, kept out of the repo
+    # the token is never put on a command line (no `setx <token>`); setup reads it hidden and uses the registry API
+    for bat in win.glob("*.bat"):
+        assert "setx" not in bat.read_text(encoding="utf-8").lower(), bat.name
+
+
+# --- credentials, setup, backtest input validation ------------------------------------------
+
+class MemStore:
+    def __init__(self, v=None):
+        self.v = {} if v is None else v
+
+    def read(self, n):
+        return self.v.get(n)
+
+    def write(self, n, val):
+        self.v[n] = val
+
+    def delete(self, n):
+        self.v.pop(n, None)
+
+
+TOK = "TESTTOKEN-not-real-0123456789-abcdefghijklmnop"
+
+
+def test_token_store_and_lookup(monkeypatch):
+    from ayesha import credentials as c
+
+    monkeypatch.delenv(c.TOKEN_ENV, raising=False)
+    st = MemStore()
+    assert c.get_token({}, store=st) == ""
+    c.save_token("  " + TOK + "\n", store=st)
+    assert st.v[c.TOKEN_ENV] == TOK
+    assert c.get_token({}, store=st) == TOK  # falls back to the saved user environment
+    assert c.get_token({c.TOKEN_ENV: "x" * 25}, store=st) == "x" * 25  # process env wins
+    for bad in ("short", "has space in it 123456789", "semi;colon0123456789abcdef", "a&b" * 10):
+        try:
+            c.save_token(bad, store=st)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    c.delete_token(store=st)
+    assert c.TOKEN_ENV not in st.v
+    monkeypatch.delenv(c.TOKEN_ENV, raising=False)
+
+
+def test_redact_scrubs_token_and_bearer():
+    from ayesha.credentials import redact
+
+    t = redact(f"GET failed Authorization: Bearer {TOK} token={TOK}", TOK)
+    assert TOK not in t and "***" in t
+    assert "abcdefgh12345" not in redact("bearer abcdefgh12345", "")
+
+
+def test_hidden_prompt_reads_stdin_when_not_a_terminal():
+    import io
+
+    from ayesha.credentials import read_hidden
+
+    class NotTty(io.StringIO):
+        def isatty(self):
+            return False
+
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    assert read_hidden("p", stdin=NotTty(TOK + "\r\n")) == TOK
+    assert read_hidden("p", stdin=Tty(""), getpass_fn=lambda prompt: "hidden") == "hidden"
+
+
+def test_oanda_feed_maps_401_to_auth_rejected_without_leaking_token():
+    import urllib.error
+
+    from ayesha.feed.oanda_feed import AuthRejected, OandaFeed
+
+    def get(url, headers):
+        assert TOK not in url  # the token travels only in the header
+        raise urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)
+
+    f = OandaFeed(equity_usd=1, token=TOK, http_get=get, min_interval_s=0)
+    try:
+        f.quote("EURUSD")
+        raise AssertionError("expected AuthRejected")
+    except AuthRejected as e:
+        assert TOK not in str(e) and "401" in str(e)
+
+
+def test_scan_exit_codes_for_the_start_script(monkeypatch, capsys, tmp_path):
+    import urllib.error
+
+    from ayesha import credentials as c
+
+    monkeypatch.setenv("AYESHA_HOME", str(tmp_path))
+    monkeypatch.delenv(c.TOKEN_ENV, raising=False)
+    monkeypatch.setattr(c, "default_store", lambda: None)
+    assert cli.main(["scan", "--feed", "oanda", "--equity", "25"]) == cli.EXIT_CONFIG  # no token
+    assert cli.main(["scan", "--feed", "oanda"]) == cli.EXIT_CONFIG  # no equity
+    monkeypatch.setenv(c.TOKEN_ENV, TOK)
+
+    def http401(url, headers):
+        raise urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)
+
+    def offline(url, headers):
+        raise urllib.error.URLError("network down")
+
+    import ayesha.feed.oanda_feed as of
+
+    monkeypatch.setattr(of, "_default_get", http401)
+    assert cli.main(["scan", "--feed", "oanda", "--equity", "25"]) == cli.EXIT_AUTH
+    monkeypatch.setattr(of, "_default_get", offline)
+    assert cli.main(["scan", "--feed", "oanda", "--equity", "25"]) == cli.EXIT_NETWORK
+    out = capsys.readouterr().out
+    assert TOK not in out and "will retry" in out
+
+
+def test_setup_runs_unattended_and_is_rerunnable(monkeypatch, tmp_path, capsys):
+    import io
+
+    from ayesha import credentials as c
+    from ayesha.broker import load_confirmed
+
+    st = MemStore()
+    monkeypatch.setenv("AYESHA_HOME", str(tmp_path))
+    monkeypatch.delenv(c.TOKEN_ENV, raising=False)
+    monkeypatch.setattr(c, "default_store", lambda: st)
+    monkeypatch.setattr("ayesha.doctor.run_doctor", lambda **kw: [(True, "fake", "ok")])
+
+    class In(io.StringIO):
+        def isatty(self):
+            return False
+
+    # token, equity, 4 contract values
+    monkeypatch.setattr("sys.stdin", In(f"{TOK}\n25\n100000\n0.01\n0.01\n200\n"))
+    assert cli.main(["setup", "--no-publish"]) == 0
+    assert st.v[c.TOKEN_ENV] == TOK
+    assert (tmp_path / "equity.txt").read_text().strip() == "25"
+    assert load_confirmed("Standard", tmp_path / "broker-confirmed.json")["volume_min"] == 0.01
+    assert (tmp_path / "pairing-code.txt").exists()
+    code = (tmp_path / "pairing-code.txt").read_text()
+    # second run: Enter keeps everything; a bad equity is refused, then a good one accepted
+    monkeypatch.setattr("sys.stdin", In("\nabc\n30\n\n"))
+    assert cli.main(["setup", "--no-publish"]) == 0
+    assert st.v[c.TOKEN_ENV] == TOK
+    assert (tmp_path / "equity.txt").read_text().strip() == "30"
+    assert (tmp_path / "pairing-code.txt").read_text() == code
+    out = capsys.readouterr().out
+    assert TOK not in out and "Please type a positive number" in out
+    monkeypatch.delenv(c.TOKEN_ENV, raising=False)
+
+
+def test_backtest_inputs_are_strictly_validated():
+    from datetime import date
+
+    import pytest
+
+    from ayesha.backtest.inputs import InvalidInput, validate
+
+    allowed = ["EURUSD", "GBPUSD", "USDJPY"]
+    today = date(2026, 10, 15)
+    p = validate("eurusd, GBPUSD,EURUSD", "1095", "", "4", allowed, today)
+    assert p.pairs == ("EURUSD", "GBPUSD") and p.days == 1095 and p.folds == 4
+    assert date(2023, 10, 16) < p.split < today
+    for pairs, days, split, folds in [
+        ("EURUSD;rm -rf /", "1095", "", "4"), ("$(whoami)", "1095", "", "4"), ("XAUUSD", "1095", "", "4"),
+        ("", "1095", "", "4"), ("EURUSD", "10", "", "4"), ("EURUSD", "99999", "", "4"),
+        ("EURUSD", "1e3", "", "4"), ("EURUSD", "1095; ls", "", "4"), ("EURUSD", "1095", "2026-02-30", "4"),
+        ("EURUSD", "1095", "2020-01-01", "4"), ("EURUSD", "1095", "2026-10-14", "4"),
+        ("EURUSD", "1095", "2025-01-01`id`", "4"), ("EURUSD", "1095", "", "1"), ("EURUSD", "1095", "", "50"),
+    ]:
+        with pytest.raises(InvalidInput):
+            validate(pairs, days, split, folds, allowed, today)
+
+
+def test_backtest_run_validate_only(capsys):
+    assert cli.main(["backtest-run", "--pairs", "EURUSD", "--days", "730", "--validate-only"]) == 0
+    assert cli.main(["backtest-run", "--pairs", "EURUSD && echo pwned", "--validate-only"]) == cli.EXIT_CONFIG
+    assert "INVALID INPUT" in capsys.readouterr().out
+
+
+def test_mtf_design_defaults_are_kept(spec):
+    """H4 context, H1 bias, M15 setup on; M5 optional (off); M1 scalp disabled and not validated."""
+    assert spec["mtf"]["context_timeframe"] == "H4"
+    assert spec["entry"]["bias_timeframe"] == "H1" and spec["entry"]["setup_timeframe"] == "M15"
+    assert spec["mtf"]["confirm_timeframe"] is None
+    assert spec["mtf"]["scalp_m1"] == {"enabled": False, "validated": False}
+
+
+def test_workflows_and_repo_hygiene():
+    import importlib.util
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+
+    def load(name):
+        spec_ = importlib.util.spec_from_file_location(name, root / "scripts" / f"{name}.py")
+        m = importlib.util.module_from_spec(spec_)
+        spec_.loader.exec_module(m)
+        return m
+
+    cw = load("check_workflows")
+    assert cw.main(["x", str(root / ".github" / "workflows")]) == 0
+    bad = root / "desktop" / "tests" / "_tmp_bad.yml"
+    try:
+        bad.write_text("on: {workflow_dispatch: {inputs: {p: {default: x}}}}\njobs:\n  j:\n    steps:\n"
+                       "      - run: echo ${{ inputs.p }}\n", encoding="utf-8")
+        errs = cw.check(bad)
+        assert any("permissions" in e for e in errs) and any("run:" in e for e in errs)
+    finally:
+        bad.unlink()
+    assert load("check_no_secrets").main(["x", str(root)]) == 0
+
+
+def test_make_signing_key_creates_loadable_pkcs12_once(tmp_path, capsys):
+    import pytest
+
+    pytest.importorskip("cryptography")
+    from cryptography.hazmat.primitives.serialization import pkcs12
+
+    out = tmp_path / "sig"
+    assert cli.main(["make-signing-key", "--out-dir", str(out)]) == 0
+    printed = capsys.readouterr().out
+    secrets_txt = (out / "github-secrets-DELETE-AFTER-USE.txt").read_text()
+    pw = secrets_txt.split("AYESHA_KEYSTORE_PASSWORD\n")[1].split("\n")[0]
+    assert len(pw) == 32 and pw not in printed  # the password is only in the local file
+    key, cert, _ = pkcs12.load_key_and_certificates((out / "ayesha-release.p12").read_bytes(), pw.encode())
+    assert key is not None and cert is not None
+    # never overwrite an existing key: that would break updates
+    assert cli.main(["make-signing-key", "--out-dir", str(out)]) == 1

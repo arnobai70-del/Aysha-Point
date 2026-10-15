@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -112,6 +113,29 @@ def _make_feed(a, spec):  # pragma: no cover - needs MT5 terminal or an OANDA to
     from ayesha.feed.mt5_feed import MT5ReadOnlyFeed
 
     return MT5ReadOnlyFeed(server_utc_offset_hours=spec["feed"]["server_utc_offset_hours"])
+
+
+# Exit codes the Windows start script understands: CONFIG and AUTH stop the restart loop.
+EXIT_CONFIG, EXIT_AUTH, EXIT_NETWORK = 2, 3, 4
+
+
+def _connect(a, spec):
+    """(exit code, feed, account). Never prints the token."""
+    from ayesha.credentials import redact
+
+    try:
+        feed = _make_feed(a, spec)
+    except Exception as e:
+        print("CONFIG ERROR: " + redact(str(e)))
+        return EXIT_CONFIG, None, None
+    try:
+        return 0, feed, feed.connect()
+    except Exception as e:
+        if type(e).__name__ == "AuthRejected":
+            print("TOKEN REJECTED: " + redact(str(e)))
+            return EXIT_AUTH, None, None
+        print(f"FEED UNREACHABLE ({type(e).__name__}): " + redact(str(e))[:200] + " - will retry")
+        return EXIT_NETWORK, None, None
 
 
 def cmd_export(a) -> int:  # pragma: no cover - needs a data feed
@@ -231,6 +255,165 @@ def cmd_report(a) -> int:
     return 0
 
 
+def cmd_set_token(a) -> int:
+    from ayesha.credentials import delete_token, read_hidden, save_token
+
+    if a.remove:
+        delete_token()
+        print("OANDA token removed from this Windows user.")
+        return 0
+    tok = read_hidden("Paste the OANDA practice token (input hidden) and press Enter: ").strip()
+    if not tok:
+        print("Nothing entered; nothing changed.")
+        return 1
+    try:
+        save_token(tok)
+    except (ValueError, RuntimeError) as e:
+        print(f"NOT SAVED: {e}")
+        return EXIT_CONFIG
+    print(f"Token saved for this Windows user ({len(tok)} characters). It is not shown or stored anywhere else.")
+    return 0
+
+
+def _ask(prompt: str) -> str:
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        return ""
+
+
+def cmd_setup(a) -> int:
+    """Interactive one-time setup used by install.bat. Safe to run again: Enter keeps each value."""
+    import shutil
+
+    from ayesha.broker import load_confirmed
+    from ayesha.credentials import get_token, read_hidden, save_token
+    from ayesha.delivery.push import load_or_create_code
+    from ayesha.paths import home
+
+    h = home()
+    h.mkdir(parents=True, exist_ok=True)
+    print(f"\n=== 1/5 OANDA practice token (price data only; stored in your Windows user settings) ===")
+    have = bool(get_token())
+    for attempt in range(3):
+        tok = read_hidden("Token (hidden; Enter = keep current): " if have else "Token (hidden): ").strip()
+        if not tok:
+            print("Kept the current token." if have else "No token yet: the scanner cannot read prices until you add one.")
+            break
+        try:
+            save_token(tok)
+            print(f"Token saved ({len(tok)} characters).")
+            break
+        except (ValueError, RuntimeError) as e:
+            print(f"Not saved: {e}")
+
+    print("\n=== 2/5 Your Exness equity in USD ===")
+    eq_file = h / "equity.txt"
+    cur = eq_file.read_text(encoding="utf-8").strip() if eq_file.exists() else ""
+    while True:
+        raw = _ask(f"Equity, e.g. 25 (Enter = keep {cur}): " if cur else "Equity, e.g. 25: ") or cur
+        try:
+            v = float(raw)
+            if not 0 < v < 10_000_000:
+                raise ValueError
+            eq_file.write_text(f"{v:g}\n", encoding="utf-8")
+            print(f"Saved equity {v:g} USD.")
+            break
+        except ValueError:
+            print("Please type a positive number.")
+            if not raw or raw == cur:
+                cur = ""
+
+    print("\n=== 3/5 Exness contract (Exness app: EURUSD -> Specification) ===")
+    if load_confirmed(a.account_type) is None or _ask("Already confirmed. Type Y to enter the values again: ").upper() == "Y":
+        cmd_confirm_broker(a)
+
+    print("\n=== 4/5 Phone pairing ===")
+    code = load_or_create_code()
+    print("Pairing code: " + "-".join(code[i:i + 4] for i in range(0, 16, 4)))
+    print("Type it in the AYESHA app: Settings -> PC link -> Pairing code, tick PC link, Save.")
+
+    print("\n=== 5/5 Health check ===")
+    from ayesha.doctor import run_doctor
+
+    rows = run_doctor(account_type=a.account_type, publish=not a.no_publish)
+    for ok, name, detail in rows:
+        print(f"{'OK  ' if ok else 'FAIL'}  {name}: {detail}")
+
+    if a.startup_script and sys.platform == "win32":
+        if _ask("\nStart the scanner automatically when you log on to Windows? (Y/N): ").upper() == "Y":
+            startup = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+            shutil.copyfile(a.startup_script, startup / "AYESHA FX scanner.bat")
+            print("Added to Startup. Delete 'AYESHA FX scanner.bat' from the Startup folder to undo.")
+    bad = sum(1 for r in rows if not r[0])
+    print("\nSetup finished." + (f" {bad} check(s) still FAIL; READY alerts stay blocked until they pass." if bad else ""))
+    return 0
+
+
+def cmd_backtest_run(a) -> int:  # export part needs network; validation is tested
+    """Validated, token-safe multi-year run: OANDA export (M15 + M5) -> validation report.
+    Used by desktop\\windows\\backtest-local.bat and the GitHub `backtest` workflow."""
+    from argparse import Namespace
+
+    from ayesha.backtest.inputs import InvalidInput, validate
+    from ayesha.paths import home
+
+    spec = load_spec(a.spec)
+    try:
+        prm = validate(a.pairs or ",".join(spec["pairs"]["enabled"]), str(a.days), a.split or "", str(a.folds),
+                       spec["pairs"]["enabled"])
+    except InvalidInput as e:
+        print(f"INVALID INPUT: {e}")
+        return EXIT_CONFIG
+    print(f"pairs={','.join(prm.pairs)} days={prm.days} split={prm.split} folds={prm.folds}")
+    if a.validate_only:
+        return 0
+    end = datetime.now(timezone.utc)
+    out = Path(a.out_dir) if a.out_dir else home() / "backtest" / end.strftime("%Y%m%d-%H%M%S")
+    data = out / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    a.feed, a.equity = "oanda", 1.0  # equity is not used for exports
+    rc, feed, _ = _connect(a, spec)
+    if rc:
+        return rc
+    start = end - timedelta(days=prm.days)
+    for pair in prm.pairs:
+        point = 0.001 if pip_size_for(pair) == 0.01 else 0.00001
+        for tf, minutes in (("M15", 15), ("M5", 5)):
+            bars = [b for b in feed.candles(pair, tf, start, end) if b.time + timedelta(minutes=minutes) <= end]
+            save_candles(data / f"{pair}_{tf}.csv", bars, point)
+            print(f"{pair} {tf}: {len(bars)} closed bars")
+    label = f"OANDA v20 {a.oanda_env} BID bars, {prm.days} days to {end:%Y-%m-%d} (exported {end:%Y-%m-%d %H:%M} UTC)"
+    ns = Namespace(spec=a.spec, data_dir=str(data), pairs=",".join(prm.pairs), modes="m15,m5confirm", news=None,
+                   split=prm.split.isoformat(), folds=prm.folds, label=label, account_type=a.account_type,
+                   out=str(out / "backtest-report.json"), md=str(out / "backtest-report.md"))
+    rc = cmd_report(ns)
+    print(f"\nReport: {out / 'backtest-report.md'}")
+    return rc
+
+
+def cmd_make_signing_key(a) -> int:
+    from ayesha.paths import home
+
+    try:
+        from ayesha.signing import make_key
+    except ImportError:
+        print("Install the signing extra first: pip install -e .[signing]")
+        return EXIT_CONFIG
+    try:
+        r = make_key(Path(a.out_dir) if a.out_dir else home() / "signing", alias=a.alias)
+    except FileExistsError as e:
+        print(f"NOT CREATED: {e}")
+        return 1
+    except ImportError:
+        print("Install the signing extra first: pip install -e .[signing]")
+        return EXIT_CONFIG
+    print(f"Keystore: {r['keystore']}")
+    print(f"GitHub secret values (passwords are only in this file): {r['secrets_file']}")
+    print(f"Certificate SHA-256: {r['sha256']}")
+    return 0
+
+
 def cmd_doctor(a) -> int:  # pragma: no cover - network; logic tested via run_doctor
     from ayesha.doctor import run_doctor
 
@@ -243,7 +426,9 @@ def cmd_doctor(a) -> int:  # pragma: no cover - network; logic tested via run_do
 
 
 def _db_path(a) -> str:
-    p = Path(a.db or Path.home() / "AyeshaFX" / "ayesha.db")
+    from ayesha.paths import home
+
+    p = Path(a.db or home() / "ayesha.db")
     p.parent.mkdir(parents=True, exist_ok=True)
     return str(p)
 
@@ -256,10 +441,11 @@ def cmd_scan(a) -> int:  # pragma: no cover - needs a live data feed
 
     spec = load_spec(a.spec)
     if a.feed == "oanda" and not (a.equity and a.equity > 0):
-        print("--equity (your Exness equity in USD) is required with --feed oanda")
-        return 2
-    feed = _make_feed(a, spec)
-    acct = feed.connect()
+        print("CONFIG ERROR: --equity (your Exness equity in USD) is required with --feed oanda")
+        return EXIT_CONFIG
+    rc, feed, acct = _connect(a, spec)
+    if rc:
+        return rc
     print(f"Connected read-only: {acct['server']} {acct['trade_mode']} {acct['currency']} | strategy "
           f"{spec['strategy_version']} ({spec['strategy_hash']})")
     notifiers = [ConsoleNotifier()]
@@ -471,6 +657,32 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out", help="write JSON")
     s.add_argument("--md", help="write Markdown")
     s.set_defaults(fn=cmd_report)
+
+    s = sub.add_parser("set-token", help="save the OANDA token for this Windows user (typed hidden)")
+    s.add_argument("--remove", action="store_true", help="delete the saved token")
+    s.set_defaults(fn=cmd_set_token)
+
+    s = sub.add_parser("setup", help="one-time interactive setup (used by install.bat)")
+    s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
+    s.add_argument("--startup-script", help="start script to copy into the Windows Startup folder if you agree")
+    s.add_argument("--no-publish", action="store_true", help="skip the phone relay test in the health check")
+    s.set_defaults(fn=cmd_setup)
+
+    s = sub.add_parser("backtest-run", help="validated multi-year OANDA export + validation report (token-safe)")
+    s.add_argument("--pairs", help="comma list from the enabled pairs (default: all enabled)")
+    s.add_argument("--days", default="1095", help="30..3650")
+    s.add_argument("--split", default="", help="YYYY-MM-DD inside the data; default = middle")
+    s.add_argument("--folds", default="4", help="2..12")
+    s.add_argument("--out-dir", help="default: <AyeshaFX home>/backtest/<timestamp>")
+    s.add_argument("--oanda-env", default="practice", choices=["practice", "live"])
+    s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
+    s.add_argument("--validate-only", action="store_true")
+    s.set_defaults(fn=cmd_backtest_run)
+
+    s = sub.add_parser("make-signing-key", help="create the stable Android release key (once; keep it offline)")
+    s.add_argument("--out-dir")
+    s.add_argument("--alias", default="ayesha")
+    s.set_defaults(fn=cmd_make_signing_key)
 
     s = sub.add_parser("doctor", help="check token, OANDA, broker spec, pairing, calendar and phone relay")
     s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])

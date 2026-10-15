@@ -1,8 +1,8 @@
 {
-  "release": "0.7.0",
+  "release": "0.7.1",
   "components": {
-    "desktop": "0.7.0",
-    "android_app": "0.4.0",
+    "desktop": "0.7.1",
+    "android_app": "0.4.1",
     "strategy": "0.3.0",
     "signal_schema": "1.0",
     "phone_wire_format": "3"

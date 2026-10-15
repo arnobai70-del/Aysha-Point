@@ -1,4 +1,4 @@
-# AYESHA FX: status (release 0.7.0, 2026-10-15)
+# AYESHA FX: status (release 0.7.1, 2026-10-15)
 
 **Implemented** = code exists. **Tested (CI)** = automated tests on GitHub Actions. **Verified** = seen working on the
 real platform (TradingView account, a real phone, the owner's broker, real market data). Nothing below is verified on
@@ -10,7 +10,9 @@ there is no evidence that the strategy has an edge.
 | Part | Implemented | Tested (CI) | Verified on real platform |
 |---|---|---|---|
 | PC scanner without MT5 (OANDA v20 data, bid/ask, quote age) | yes | fake-HTTP tests | **pending**: owner OANDA practice token |
-| Windows one-time setup (`install.bat`), daily start with auto-restart (`start-ayesha.bat`), `ayesha doctor` | yes | Windows CI runs the start script and doctor; commands in the scripts are parsed by a test | **pending**: owner PC |
+| Windows one-time setup (`install.bat` → `ayesha setup`), daily start (`start-ayesha.bat`, restarts on network errors, stops on config/token errors), `ayesha doctor`, `backtest-local.bat` | yes | **Windows CI runs every script end to end** incl. failures and recovery (`scripts/windows_script_tests.ps1`) | **pending**: owner PC |
+| Credential handling (token hidden, registry API, redaction), hardened backtest workflow, secret and workflow scans | yes | yes (see SECURITY.md) | n/a |
+| Android journal backup / restore, stable release key tooling | yes | Kotlin merge/retention tests; CI signing self-test | **pending**: device; owner creates the key |
 | Multi-timeframe: H4 context, H1 bias / last BOS-CHoCH / premium-discount, M15 setup, optional M5 confirmation, M1 scalp refused | yes | unit + causality tests, replay and scanner tests | needs real data |
 | Hard READY guard (news CLEAR, verified spec, fresh quote, fresh data, lot > 0, no blockers) independent of config | yes | `test_ready_guard_*` | n/a |
 | Signed PC → phone push via ntfy.sh, heartbeat, READY retry after a failed push, WATCH → READY upgrade | yes | unit + **live relay round trip in CI** | **pending**: real phone |
@@ -33,12 +35,15 @@ there is no evidence that the strategy has an edge.
 - **NO_TRADE / UNVERIFIED / EXPIRED** never raise an entry notification; they sit in the archive with reasons.
 
 ## Owner actions needed (in order)
+Step-by-step Bengali guide with expected results: [10-owner-testing-guide.md](10-owner-testing-guide.md).
+
 1. Windows PC: run `desktop\windows\install.bat` once (Python, token, equity, Exness contract, pairing, doctor).
 2. Phone: install the APK, grant notification access, type the pairing code, press Test.
-3. GitHub: add the repository secret `AYESHA_OANDA_TOKEN`, then run **Actions → backtest → Run workflow** for the
-   first real multi-year report (AT-25).
+3. Real-data report: run `desktop\windows\backtest-local.bat` (token stays on the PC), or add the repository
+   secret `AYESHA_OANDA_TOKEN` and run **Actions → backtest** (AT-25). Send the report files.
 4. TradingView: add the indicator to EURUSD 15m and report compile errors or a screenshot (AT-16); try one
    `alert()` alert on Basic and report what happens (AT-01).
-5. Add the four `AYESHA_KEYSTORE_*` repository secrets so app updates install without uninstalling (AT-23).
+5. Run `desktop\windows\make-signing-key.bat`, add its four `AYESHA_KEYSTORE_*`/`AYESHA_KEY_*` secrets, keep the key
+   offline (AT-23). Back up the journal in the app before every uninstall.
 
 See [VERIFICATION.md](VERIFICATION.md), [MASTER_CHECKLIST.md](MASTER_CHECKLIST.md) and [FEATURE_MATRIX.md](FEATURE_MATRIX.md).

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1 — 2026-10-15 (security hardening and owner-test preparation)
+- `backtest` workflow: inputs passed only as quoted env vars and validated (`ayesha backtest-run`: pair allowlist, 30–3650 days, 2–12 folds, real split date inside the data); token only in the export step; `permissions: contents: read`; `persist-credentials: false`; only report files uploaded. New `scripts/check_workflows.py` fails CI on `${{ inputs/github.event/secrets }}` inside `run:`; `scripts/check_no_secrets.py` scans tracked files for credentials.
+- OANDA token: no more `setx <token>` (command-line exposure). `ayesha set-token` / `ayesha setup` read it hidden and write HKCU\Environment through the registry API; lookup falls back to it; 401/403 ⇒ `AuthRejected`; error text redacted. See docs/SECURITY.md.
+- Windows: `install.bat` now finds Python ≥ 3.11 robustly, records the interpreter, and runs `ayesha setup` (rerunnable, Enter keeps values). `start-ayesha.bat` restarts only on network/data failures (exit 4), stops on config (2) or rejected token (3), optional restart cap. New `backtest-local.bat` (multi-year report on the PC, token never in GitHub) and `make-signing-key.bat`.
+- Windows CI runs the scripts end to end: before install, first install, re-run, rejected token, network down with capped restarts, corrupt equity, invalid backtest inputs, moved Python, token removal.
+- Android 0.4.1: journal backup file (export / merge-restore, never loses a typed result; pairing code excluded), journal trades never dropped by the 300-alert limit. `ayesha make-signing-key` creates a stable PKCS#12 release key; every Android build self-tests such a key and prints the signer SHA-256 in the release notes.
+- Docs: Bengali owner test guide for Windows PC, TradingView Basic and Android 13 (docs/10), SECURITY.md.
+
 ## 0.7.0 — 2026-10-15 (integration, multi-timeframe, validation)
 - Multi-timeframe engine (strategy 0.3.0): one combined setup per pair. H4 context (blocks when H1 and H4 both oppose), H1 bias + last BOS/CHoCH + premium/discount zone, M15 SWEEP→MSS→FVG setup, optional M5 confirmation (`mtf.confirm_timeframe: M5`, off by default: entry becomes the confirmation close, RR recomputed, 15-minute expiry). M1 scalp is refused until validated. Every signal carries an `mtf` explanation.
 - Scanner: hard READY guard independent of config (news CLEAR, verified spec, fresh quote and data, lot > 0, no blockers ⇒ else NO_TRADE `READY_GUARD:<reason>`); failed READY pushes retried until expiry, never twice (per-status delivery keys); WATCH_M5 → READY / CONFIRM_FAILED updates of the same signal id; WATCH_M5 expiry.

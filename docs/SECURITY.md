@@ -1,0 +1,34 @@
+# Security notes (credentials, workflows, signing) — release 0.7.1
+
+The repository is **public**. Nothing secret may ever be committed; CI enforces this with
+`scripts/check_no_secrets.py` (OANDA-token shape, private keys, keystores, GitHub/AWS/Telegram tokens).
+
+## OANDA token audit (2026-10-15)
+| Place | Before 0.7.1 | Now |
+|---|---|---|
+| Windows install | `setx AYESHA_OANDA_TOKEN "<token>"`: the token was a **command-line argument** of `setx`, visible to other processes and process-audit logs | `ayesha setup` / `ayesha set-token` read it hidden (getpass) and write `HKCU\Environment` with the registry API; no subprocess, no argument. Test: `test_windows_scripts_call_valid_commands` forbids `setx` in every .bat |
+| Reading | process environment only | process environment, then `HKCU\Environment` (`ayesha/credentials.py`) |
+| HTTP | `Authorization: Bearer` header to OANDA over HTTPS | unchanged; the URL never contains it (`test_oanda_feed_maps_401_to_auth_rejected_without_leaking_token`) |
+| Errors and logs | exception text printed as is | HTTP errors re-raised without the original chain; 401/403 ⇒ `AuthRejected`; doctor and scan pass every message through `redact()`; scripted tests assert the token never appears in output (`test_setup_runs_unattended_and_is_rerunnable`, `test_scan_exit_codes_for_the_start_script`, Windows CI scenarios) |
+| Database, reports, artifacts | not stored | not stored; reports contain only price-derived numbers |
+| GitHub `backtest` workflow | token was job-level env for **every** step (including `pip install`, which runs third-party code); inputs were interpolated into `run:` (shell injection) | token only in the single export step, as env; inputs passed as quoted env vars and validated (`ayesha backtest-run --validate-only`); `permissions: contents: read`; `persist-credentials: false`; only the two report files are uploaded. `scripts/check_workflows.py` fails CI on any `${{ inputs.* }}`, `${{ github.event.* }}` or `${{ secrets.* }}` inside `run:` |
+
+Remaining risk, stated plainly: any program running as your Windows user can read your user
+environment (true for every environment variable). Use an **OANDA practice** token only, and revoke it
+on the OANDA site (Manage API Access) if the PC is compromised. AYESHA never calls any order endpoint
+(`scripts/check_no_order_api.py`), but the token itself would allow it on the practice account.
+
+Artifacts of a public repository can be downloaded by any signed-in GitHub user. Reports hold no
+secrets, but if you want them private use `desktop\windows\backtest-local.bat` (nothing leaves the PC).
+
+## Backtest input validation
+`ayesha/backtest/inputs.py`: pairs must be in the strategy's enabled list (exact `[A-Z]{6}`), days
+30–3650 (digits only), folds 2–12, split date `YYYY-MM-DD`, a real calendar date inside the data.
+Anything else exits with code 2 before any network call. Tested with injection strings
+(`test_backtest_inputs_are_strictly_validated`).
+
+## Android signing and data
+See [10-owner-testing-guide.md](10-owner-testing-guide.md) (section গ৪). Summary: Android keeps app data on
+update only when the new APK has the same signing key. `ayesha make-signing-key` creates a PKCS#12
+key locally; its four values go into GitHub secrets; CI proves on every build that a key made this way
+signs the APK (`Signing self-test` step) and prints the signer SHA-256 in each release note.

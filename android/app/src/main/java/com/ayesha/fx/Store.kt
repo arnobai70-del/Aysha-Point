@@ -2,6 +2,7 @@ package com.ayesha.fx
 
 import android.content.Context
 import com.ayesha.fx.core.AyeshaAlert
+import com.ayesha.fx.core.Backup
 import com.ayesha.fx.core.JournalTrade
 import com.ayesha.fx.core.Mtf
 import com.ayesha.fx.core.StrategyInfo
@@ -81,6 +82,27 @@ class Prefs(context: Context) {
         get() = p.getString("lastReject", "")!!
         set(v) = p.edit().putString("lastReject", v).apply()
 
+    var lastBackupMs: Long
+        get() = p.getLong("lastBackupMs", 0L)
+        set(v) = p.edit().putLong("lastBackupMs", v).apply()
+
+    /** Settings that go into a backup file. The pairing code is deliberately NOT included. */
+    fun settingsJson(): JSONObject = JSONObject()
+        .put("equity", equityUsd).put("risk", riskPercent).put("account", accountType)
+        .put("spread", spreadPips).put("slip", slippagePips).put("watchlist", JSONArray(watchlist.sorted()))
+
+    fun restoreSettings(o: JSONObject) {
+        o.optDouble("equity").takeIf { it.isFinite() && it > 0 }?.let { equityUsd = it }
+        o.optDouble("risk").takeIf { it.isFinite() && it > 0 && it <= 1.0 }?.let { riskPercent = it }
+        o.optString("account").takeIf { it == "Standard" || it == "StandardCent" }?.let { accountType = it }
+        o.optDouble("spread").takeIf { it.isFinite() && it >= 0 }?.let { spreadPips = it }
+        o.optDouble("slip").takeIf { it.isFinite() && it >= 0 }?.let { slippagePips = it }
+        o.optJSONArray("watchlist")?.let { arr ->
+            val w = (0 until arr.length()).map { arr.getString(it) }.filter { it in StrategyInfo.PAIRS }.toSet()
+            if (w.isNotEmpty()) watchlist = w
+        }
+    }
+
     fun reject(reason: String) {
         rejectedCount = rejectedCount + 1
         lastRejectReason = reason
@@ -137,7 +159,7 @@ class AlertStore(context: Context) {
         val i = list.indexOfFirst { it.alert.id == a.id }
         if (i < 0) {
             list.add(0, Entry(a))
-            save(list.take(300))
+            save(trim(list))
             return Upsert.NEW
         }
         val old = list[i]
@@ -167,6 +189,50 @@ class AlertStore(context: Context) {
         .map { JournalTrade(it.alert.id, it.alert.ticker, it.alert.origin, it.closedAtMs ?: it.alert.receivedAtMs, it.resultUsd!!, it.riskUsd) }
 
     fun clearTests() = synchronized(LOCK) { save(readLocked().filter { !it.alert.isTest }) }
+
+    /** Journal entries (trades the owner took) are never dropped by the 300-alert limit. */
+    private fun trim(list: List<Entry>): List<Entry> = Backup.retain(list, { it.userStatus == "TAKEN" && !it.alert.isTest }, 300)
+
+    /** The whole inbox + journal + settings as one JSON document for a backup file. */
+    fun exportJson(prefs: Prefs, appVersion: String): String = synchronized(LOCK) {
+        val arr = JSONArray()
+        readLocked().forEach { arr.put(toJson(it)) }
+        JSONObject().put("format", Backup.FORMAT).put("version", Backup.VERSION)
+            .put("exportedAtMs", System.currentTimeMillis()).put("appVersion", appVersion)
+            .put("settings", prefs.settingsJson()).put("entries", arr).toString(1)
+    }
+
+    data class ImportResult(val added: Int, val updated: Int, val unchanged: Int)
+
+    /** Merge a backup into the store. Throws IllegalArgumentException for a file that is not an AYESHA backup. */
+    fun importJson(text: String, prefs: Prefs): ImportResult = synchronized(LOCK) {
+        val o = try { JSONObject(text) } catch (e: Exception) { throw IllegalArgumentException("not a JSON file") }
+        require(o.optString("format") == Backup.FORMAT) { "not an AYESHA backup file" }
+        require(o.optInt("version", 0) in 1..Backup.VERSION) { "backup from a newer app version; update the app first" }
+        val incoming = o.optJSONArray("entries") ?: JSONArray()
+        val list = readLocked().toMutableList()
+        var added = 0
+        var updated = 0
+        var same = 0
+        for (i in 0 until incoming.length()) {
+            val e = fromJson(incoming.getJSONObject(i)) ?: continue
+            val at = list.indexOfFirst { it.alert.id == e.alert.id }
+            if (at < 0) {
+                list.add(e); added++
+            } else {
+                val cur = list[at]
+                if (Backup.preferIncoming(Backup.Mark(cur.userStatus, cur.resultUsd, cur.closedAtMs),
+                        Backup.Mark(e.userStatus, e.resultUsd, e.closedAtMs))) {
+                    list[at] = cur.copy(userStatus = e.userStatus, resultUsd = e.resultUsd,
+                        riskUsd = e.riskUsd ?: cur.riskUsd, closedAtMs = e.closedAtMs); updated++
+                } else same++
+            }
+        }
+        list.sortByDescending { it.alert.receivedAtMs }
+        save(trim(list))
+        o.optJSONObject("settings")?.let { prefs.restoreSettings(it) }
+        ImportResult(added, updated, same)
+    }
 
     private fun save(list: List<Entry>) {
         val arr = JSONArray()

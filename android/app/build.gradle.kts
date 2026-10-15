@@ -14,13 +14,14 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
-        versionName = "0.4.0"
+        versionName = "0.4.1"
     }
 
     signingConfigs {
         create("release") {
             if (keystorePath != null) {
                 storeFile = file(keystorePath)
+                storeType = System.getenv("AYESHA_KEYSTORE_TYPE") ?: "pkcs12"  // `ayesha make-signing-key` writes PKCS#12
                 storePassword = System.getenv("AYESHA_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("AYESHA_KEY_ALIAS")
                 keyPassword = System.getenv("AYESHA_KEY_PASSWORD")
