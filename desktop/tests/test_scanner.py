@@ -5,14 +5,26 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from ayesha import capital as capmod
 from ayesha.feed.static_specs import assumed_fx_spec
 from ayesha.models import Quote
 from ayesha.news.calendar import NewsCalendar
-from ayesha.scanner import Scanner
+from ayesha.scanner import Scanner as _Scanner
 from ayesha.storage.db import Registry
 from tests.helpers import synthetic
 
 TF = timedelta(minutes=15)
+
+
+def Scanner(feed, spec, reg, notifiers, cal=None, clock=None, capital="fresh"):  # noqa: N802
+    """Test wrapper: the owner confirmed capital and positions just now, and the calendar file is fresh."""
+    if capital == "fresh":
+        capital = capmod.fresh(feed.equity, clock)
+    src = cal
+    if isinstance(cal, NewsCalendar):
+        def src():
+            return NewsCalendar(cal.events, *cal.coverage, provider="TEST", fetched_at=clock())
+    return _Scanner(feed, spec, reg, notifiers, src, clock=clock, capital=capital)
 
 
 class FakeFeed:
@@ -26,7 +38,7 @@ class FakeFeed:
         return {"equity": self.equity, "balance": self.equity, "margin_free": self.equity}
 
     def instrument(self, symbol):
-        return replace(assumed_fx_spec(symbol, 1.08), source=f"MT5:{symbol}m")
+        return replace(assumed_fx_spec(symbol, 1.08), source=f"MT5:{symbol}m", margin_per_lot=540.0)
 
     def _last(self):
         i = bisect.bisect_right(self.times, self.clock() - TF) - 1
@@ -200,12 +212,13 @@ def test_ready_guard_holds_even_with_strict_news_off(scan_spec, tmp_path):
     payloads = [json.loads(r["payload"]) for r in reg.db.execute("SELECT payload FROM signals")]
     assert payloads and rec.sent == []
     assert all(p["status"] != "READY" for p in payloads)
-    assert any("READY_GUARD:NEWS_NOT_VERIFIED_CLEAR" in p["blockers"] for p in payloads)
+    # no calendar: the news guard blocks before the READY guard is even reached, strict_news or not
+    assert all("NEWS_UNVERIFIED" in p["blockers"] and "NEWS_SOURCE_MISSING" in p["blockers"] for p in payloads)
 
 
 class AssumedSpecFeed(FakeFeed):
     def instrument(self, symbol):
-        return assumed_fx_spec(symbol, 1.08)  # ASSUMED_EXNESS_* source: not verified
+        return replace(assumed_fx_spec(symbol, 1.08), margin_per_lot=540.0)  # ASSUMED_* source: not verified
 
 
 def test_ready_guard_blocks_unverified_contract(scan_spec, tmp_path):

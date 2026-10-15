@@ -19,6 +19,10 @@ GRADE_LABEL = {"A_PLUS": "A+", "WATCH": "WATCH", "IGNORE": "IGNORE"}
 
 
 def format_alert(rec: dict[str, Any]) -> str:
+    if rec.get("status") == "INVALIDATED":
+        why = ", ".join(b for b in rec.get("blockers") or [] if b != "INVALIDATED")
+        return (f"[AYESHA FX] ❌ CANCELLED before entry — {rec['pair']} {rec['direction']} | id {rec['signal_id'][:8]}\n"
+                f"Reason: {why}\nDo not place this order. If you already did, review it yourself in Exness.")
     icon = "🟢" if rec["direction"] == "BUY" else "🔴"
     tp = ", ".join(f"{x:.5f}" for x in rec["take_profits"])
     bp = rec.get("broker_prices") or {}
@@ -35,11 +39,28 @@ def format_alert(rec: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_news_console(n: dict[str, Any]) -> str:
+    label = {"UPCOMING": "NEWS SOON", "PRE_EVENT_LOCKOUT": "NEWS LOCKOUT", "RELEASED": "NEWS RELEASED",
+             "WINDOW_END": "NEWS WINDOW ENDED"}.get(n["phase"], n["phase"])
+    out = [f"[AYESHA FX] 📰 {label}: {n['currency']} {n['title']} ({n['impact']}) at {n['time_utc']}",
+           f"New trades blocked on {', '.join(n['pairs'])} until spread/volatility settle. Review any open trade."]
+    if n.get("scenario"):
+        out.append(n["scenario"].get("summary", ""))
+    if n.get("reaction"):
+        r = n["reaction"]
+        out.append(f"Reaction: {r.get('state')} (move {r.get('observed_pair_move')}, settled {r.get('market_settled')})")
+    return "\n".join(out)
+
+
 class ConsoleNotifier:
     channel = "console"
 
     def send(self, rec: dict[str, Any]) -> tuple[bool, str]:
         print("\n" + format_alert(rec) + "\n", flush=True)
+        return True, "printed"
+
+    def news(self, notice: dict[str, Any], strategy_hash: str = "") -> tuple[bool, str]:
+        print("\n" + format_news_console(notice) + "\n", flush=True)
         return True, "printed"
 
 

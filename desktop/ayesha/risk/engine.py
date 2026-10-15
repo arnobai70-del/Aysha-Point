@@ -10,11 +10,15 @@ is added to the loss side only. Nothing here can round a lot UP to make a trade 
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from decimal import ROUND_FLOOR, Decimal
 from typing import Any
 
 from ayesha.models import AccountState, InstrumentSpec
+
+# Hard per-trade ceiling. No config value, news model or score can raise it (News spec B2, C05).
+HARD_MAX_RISK_PERCENT = 1.0
 
 
 @dataclass(frozen=True)
@@ -65,6 +69,9 @@ class RiskDecision:
     stop_pips: float = 0.0
     min_lot_loss_usd: float = 0.0  # what the smallest allowed trade would risk
     min_lot_loss_percent: float = 0.0
+    nominal_budget_usd: float = 0.0  # equity x risk%: before the daily / open-risk limits
+    budget_limited_by: str = ""  # "" | DAILY_LOSS_LIMIT | OPEN_RISK_LIMIT
+    margin_required_usd: float | None = None
 
     @property
     def status(self) -> str:
@@ -92,13 +99,16 @@ def evaluate(
     d = RiskDecision(ok=False)
     b = d.blockers
     if live and not (inst.source.startswith("MT5") or inst.source.startswith("OWNER_CONFIRMED:")):
-        b.append("CONTRACT_SPEC_UNVERIFIED")
+        b.append("BROKER_SPEC_UNVERIFIED")
 
     # --- configuration and environment gates -------------------------------------------
-    if cfg.risk_per_trade_percent > cfg.max_risk_per_trade_percent:
+    rp = cfg.risk_per_trade_percent
+    if not (math.isfinite(rp) and 0 < rp <= min(cfg.max_risk_per_trade_percent, HARD_MAX_RISK_PERCENT)):
         b.append("CONFIG_RISK_ABOVE_CAP")
-    if acct.equity_usd <= 0:
+    if not math.isfinite(acct.equity_usd) or acct.equity_usd <= 0:
         b.append("EQUITY_UNKNOWN")
+    if not all(math.isfinite(x) and x >= 0 for x in (acct.realized_loss_today_usd, acct.open_risk_usd)):
+        b.append("ACCOUNT_STATE_INVALID")
     if inst.tick_value <= 0 or inst.tick_size <= 0 or inst.volume_step <= 0 or inst.volume_min <= 0:
         b.append("CONTRACT_SPEC_MISSING")
     if not p.market_open:
@@ -118,7 +128,8 @@ def evaluate(
     if sgn * (p.entry - p.stop) <= 0 or any(sgn * (t - p.entry) <= 0 for t in p.targets):
         b.append("INVALID_LEVELS")
         return d
-    if "CONTRACT_SPEC_MISSING" in b or "EQUITY_UNKNOWN" in b:
+    if "CONTRACT_SPEC_MISSING" in b or "EQUITY_UNKNOWN" in b or "ACCOUNT_STATE_INVALID" in b \
+            or "CONFIG_RISK_ABOVE_CAP" in b:
         return d
 
     pip = inst.pip_size
@@ -131,17 +142,26 @@ def evaluate(
     if inst.stops_level_points and stop_dist < inst.stops_level_points * inst.point:
         b.append("STOP_INSIDE_BROKER_STOPS_LEVEL")
 
-    # --- sizing ----------------------------------------------------------------------------
+    # --- sizing (spec B2: usable = min(nominal, remaining daily, remaining open)) ----------------
+    eq = acct.equity_usd
     per_price_per_lot = inst.tick_value / inst.tick_size  # USD per 1.0 price unit per lot
     loss_price = stop_dist + p.spread + cfg.slippage_buffer_pips * pip
     d.loss_per_lot_usd = loss_price * per_price_per_lot + inst.commission_per_lot_round_trip
-    d.risk_budget_usd = acct.equity_usd * cfg.risk_per_trade_percent / 100.0
+    d.nominal_budget_usd = eq * rp / 100.0
+    remaining_day = eq * cfg.max_daily_loss_percent / 100.0 - acct.realized_loss_today_usd - acct.open_risk_usd
+    remaining_open = eq * cfg.max_open_risk_percent / 100.0 - acct.open_risk_usd
+    d.risk_budget_usd = max(0.0, min(d.nominal_budget_usd, remaining_day, remaining_open))
+    if d.risk_budget_usd < d.nominal_budget_usd - 1e-12:
+        d.budget_limited_by = "DAILY_LOSS_LIMIT" if remaining_day <= remaining_open else "OPEN_RISK_LIMIT"
     d.raw_lot = d.risk_budget_usd / d.loss_per_lot_usd
     d.lot = min(floor_to_step(d.raw_lot, inst.volume_step), floor_to_step(inst.volume_max, inst.volume_step))
     d.min_lot_loss_usd = inst.volume_min * d.loss_per_lot_usd
-    d.min_lot_loss_percent = 100.0 * d.min_lot_loss_usd / acct.equity_usd
+    d.min_lot_loss_percent = 100.0 * d.min_lot_loss_usd / eq
     if d.lot < inst.volume_min:
-        b.append("MIN_LOT_EXCEEDS_RISK")
+        if d.risk_budget_usd <= 0:
+            b.append("DAILY_RISK_PAUSE" if d.budget_limited_by == "DAILY_LOSS_LIMIT" else "OPEN_RISK_CAP")
+        else:
+            b.append("MIN_LOT_EXCEEDS_RISK")
         d.lot = 0.0
     d.max_loss_usd = d.lot * d.loss_per_lot_usd
 
@@ -153,12 +173,12 @@ def evaluate(
         b.append("NET_RR_BELOW_MIN")
 
     # --- account-level circuit breakers ------------------------------------------------------
-    eq = acct.equity_usd
-    if acct.losses_today >= cfg.max_losses_per_day:
+    if acct.losses_today >= cfg.max_losses_per_day and "DAILY_RISK_PAUSE" not in b:
         b.append("DAILY_RISK_PAUSE")
-    elif acct.realized_loss_today_usd + d.risk_budget_usd > eq * cfg.max_daily_loss_percent / 100.0:
+    elif acct.realized_loss_today_usd + acct.open_risk_usd + d.max_loss_usd > eq * cfg.max_daily_loss_percent / 100.0 + 1e-9 \
+            and "DAILY_RISK_PAUSE" not in b:
         b.append("DAILY_RISK_PAUSE")
-    if acct.open_risk_usd + d.max_loss_usd > eq * cfg.max_open_risk_percent / 100.0 + 1e-9:
+    if acct.open_risk_usd + d.max_loss_usd > eq * cfg.max_open_risk_percent / 100.0 + 1e-9 and "OPEN_RISK_CAP" not in b:
         b.append("OPEN_RISK_CAP")
     new_exp = currency_exposure(p.symbol, p.direction)
     for ccy, s in new_exp.items():
@@ -167,8 +187,11 @@ def evaluate(
             b.append(f"CORRELATED_EXPOSURE_{ccy}")
             break
     if inst.margin_per_lot is not None and acct.free_margin_usd is not None and d.lot > 0:
-        if d.lot * inst.margin_per_lot > acct.free_margin_usd:
+        d.margin_required_usd = d.lot * inst.margin_per_lot
+        if d.margin_required_usd > acct.free_margin_usd:
             b.append("INSUFFICIENT_FREE_MARGIN")
+    elif live and d.lot > 0:
+        b.append("MARGIN_UNVERIFIED")  # leverage or free margin unknown: never assume the margin is there
 
     d.ok = not b
     return d

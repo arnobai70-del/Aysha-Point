@@ -12,10 +12,9 @@ from ayesha.feed.oanda_feed import OandaFeed, oanda_instrument, parse_time
 from ayesha.models import AccountState
 from ayesha.news.ff_feed import FFCalendarSource, parse_ff
 from ayesha.risk.engine import RiskConfig, TradeProposal, evaluate
-from ayesha.scanner import Scanner
 from ayesha.storage.db import Registry
 from tests.helpers import synthetic
-from tests.test_scanner import TF, FakeFeed, _calendar
+from tests.test_scanner import TF, FakeFeed, Scanner, _calendar
 
 # Shared with android/app/src/test/.../CoreTest.kt: the same code + body must give the same signature.
 PARITY_CODE = "ABCD-EFGH-JKMN-PQRS"
@@ -59,7 +58,7 @@ def test_oanda_feed_reads_bid_ask_and_skips_forming_bar(tmp_path):
     assert bars[0].spread == pytest.approx(0.0001)
     q = f.quote("EURUSD")
     assert q.spread == pytest.approx(0.00012) and q.age_seconds(NOW) >= 0
-    assert f.account()["equity"] == 25 and f.account()["source"] == "OWNER_TYPED"
+    assert f.account()["source"] == "NOT_A_BROKER_ACCOUNT"  # OANDA's own balance is never read or used
     assert oanda_instrument("eurusd") == "EUR_USD"
     assert parse_time("2026-10-14T00:15:00.123456789Z") == datetime(2026, 10, 14, 0, 15, 0, 123456, tzinfo=timezone.utc)
     # cross: JPY quote valued through USDJPY from the same feed
@@ -78,15 +77,21 @@ def test_assumed_exness_spec_blocks_live_until_owner_confirms(tmp_path):
     spec = broker.broker_spec("EURUSD", 1.0, "Standard", confirm_path=p)
     prop = TradeProposal("EURUSD", "BUY", 1.0812, 1.0794, (1.0861,), 0.0001, 0.001, 1, True, "CLEAR")
     acct = AccountState(equity_usd=100_000)
-    assert "CONTRACT_SPEC_UNVERIFIED" in evaluate(prop, spec, acct, RiskConfig()).blockers
+    assert "BROKER_SPEC_UNVERIFIED" in evaluate(prop, spec, acct, RiskConfig()).blockers
     with pytest.raises(ValueError):
         broker.save_confirmed("Standard", {"contract_size": 100000, "volume_min": 0, "volume_step": 0.01,
                                            "volume_max": 200}, p)
     broker.save_confirmed("Standard", {"contract_size": 100000, "volume_min": 0.01, "volume_step": 0.01,
                                        "volume_max": 200}, p)
     spec2 = broker.broker_spec("EURUSD", 1.0, "Standard", confirm_path=p)
-    assert spec2.source == "OWNER_CONFIRMED:EXNESS_STANDARD"
-    assert evaluate(prop, spec2, acct, RiskConfig()).ok
+    assert spec2.source == "OWNER_CONFIRMED:EXNESS_STANDARD:EURUSD"
+    # leverage unknown => margin cannot be checked => never READY
+    assert evaluate(prop, spec2, acct, RiskConfig()).blockers == ["MARGIN_UNVERIFIED"]
+    broker.save_leverage("Standard", "UNLIMITED", p)
+    spec3 = broker.broker_spec("EURUSD", 1.0, "Standard", confirm_path=p, mid=1.08)
+    assert spec3.margin_per_lot == pytest.approx(100_000 * 1.08 / 200)  # unlimited is checked at 1:200
+    acct.free_margin_usd = 100_000
+    assert evaluate(prop, spec3, acct, RiskConfig()).ok
     with pytest.raises(KeyError):
         broker.broker_spec("EURUSD", 1.0, "Pro", confirm_path=p)
     with pytest.raises(ValueError):
@@ -217,16 +222,20 @@ FIXTURE_REC = {
     "setup": "SWEEP_MSS_FVG", "score_points": 88, "news_verification": "CLEAR", "spread_pips": 0.9,
     "mtf": {"H4": "UP", "H1": "UP", "H1_LAST": "BOS_UP", "H1_ZONE": "DISCOUNT", "M15": "PDL_SWEEP>CHOCH>FVG",
             "M5": "OFF"},
+    "news_phase": "CLEAR", "news_event": None, "news_verified_at_utc": "2026-10-14T09:00:00+00:00",
+    "capital_snapshot_version": 3, "capital_verified_at_utc": "2026-10-14T08:00:00+00:00",
+    "capital_equity_usd": 500.0, "risk_percent": 0.5,
+    "contract_spec_source": "OWNER_CONFIRMED:EXNESS_STANDARD:EURUSD",
 }
 
 
 def test_pc_push_fixture_is_current():
     """contracts/fixtures/pc-push-ready.txt is read by the Android parser test (cross-language parity)."""
-    msg = push.signed(PARITY_CODE, push.format_push(FIXTURE_REC))
+    msg = push.signed(PARITY_CODE, push.format_push(FIXTURE_REC, code=PARITY_CODE))
     if FIXTURE.read_text(encoding="utf-8") != msg:
         raise AssertionError("fixture out of date; regenerate with: python -c 'from tests.test_no_mt5_path import "
                              "write_fixture; write_fixture()' (from desktop/)")
 
 
 def write_fixture():
-    FIXTURE.write_text(push.signed(PARITY_CODE, push.format_push(FIXTURE_REC)), encoding="utf-8")
+    FIXTURE.write_text(push.signed(PARITY_CODE, push.format_push(FIXTURE_REC, code=PARITY_CODE)), encoding="utf-8")

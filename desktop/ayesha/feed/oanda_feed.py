@@ -72,11 +72,12 @@ class AuthRejected(RuntimeError):
 class OandaFeed:
     """Implements the scanner `Feed` protocol without MT5.
 
-    `equity_usd` is the owner's Exness equity typed on the command line: OANDA is only a data
-    source here, its own demo balance is never used for sizing.
+    OANDA is only a data source here: its own practice balance is never read and never used for
+    sizing. The owner's Exness equity comes from the capital snapshot (`ayesha capital`); the
+    optional `equity_usd` is kept only for offline research commands.
     """
 
-    def __init__(self, equity_usd: float, account_type: str = "Standard", token: str | None = None,
+    def __init__(self, equity_usd: float | None = None, account_type: str = "Standard", token: str | None = None,
                  environment: str = "practice", http_get: HttpGet | None = None,
                  clock: Callable[[], datetime] | None = None, confirm_path=None, min_interval_s: float = 0.2) -> None:
         if token is None:
@@ -88,10 +89,10 @@ class OandaFeed:
             raise MissingToken("No OANDA token: run install.bat (or `ayesha set-token`)")
         if environment not in HOSTS:
             raise ValueError(f"environment must be one of {sorted(HOSTS)}")
-        if not (equity_usd > 0):
+        if equity_usd is not None and not (equity_usd > 0):
             raise ValueError("equity_usd must be positive (your Exness equity in USD)")
         self.host = HOSTS[environment]
-        self.equity_usd = float(equity_usd)
+        self.equity_usd = float(equity_usd) if equity_usd is not None else None
         self.account_type = account_type
         self._get = http_get or _default_get
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -117,7 +118,7 @@ class OandaFeed:
     # --- Feed protocol ---------------------------------------------------------------------
     def account(self) -> dict[str, Any]:
         return {"equity": self.equity_usd, "balance": self.equity_usd, "margin_free": None,
-                "currency": "USD", "source": "OWNER_TYPED", "server": "OANDA data feed", "trade_mode": "DATA_ONLY"}
+                "currency": "USD", "source": "NOT_A_BROKER_ACCOUNT", "server": "OANDA data feed", "trade_mode": "DATA_ONLY"}
 
     def connect(self) -> dict[str, Any]:
         self.quote("EURUSD")  # proves the token and the network work
@@ -180,11 +181,12 @@ class OandaFeed:
 
     def spread_floor(self, symbol: str) -> float:
         """Owner's typical Exness spread (price units). OANDA's spread can be tighter than Exness's."""
-        from ayesha.broker import load_assumed
+        from ayesha.broker import typical_spread_pips
         from ayesha.models import pip_size_for
 
-        return float(load_assumed(self.account_type).get("typical_spread_pips", 0)) * pip_size_for(symbol)
+        return typical_spread_pips(symbol, self.account_type, self.confirm_path) * pip_size_for(symbol)
 
     def instrument(self, symbol: str) -> InstrumentSpec:
         q = self.quote(symbol)
-        return broker_spec(symbol, self.usd_per_quote(symbol, (q.bid + q.ask) / 2), self.account_type, self.confirm_path)
+        mid = (q.bid + q.ask) / 2
+        return broker_spec(symbol, self.usd_per_quote(symbol, mid), self.account_type, self.confirm_path, mid=mid)

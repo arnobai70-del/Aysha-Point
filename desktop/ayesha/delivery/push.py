@@ -4,18 +4,26 @@ Why a relay: the owner runs no VPS and the phone cannot reach the PC directly. n
 open-source publish/subscribe service with a public free server; the PC POSTs to a topic and the
 AYESHA app keeps a connection to the same topic.
 
-What the relay sees: the alert text (pair, levels, status). Never account login, balance,
-equity or tokens. Anyone who learns the topic name can read those alerts, so the topic is derived
+What the relay sees: the alert text (pair, levels, status, news phase). Never account login,
+balance, equity or tokens: capital travels only as a keyed digest (CAPH=) that the phone can
+compare with its own equity setting, plus the snapshot version and time. Anyone who learns the topic name can read those alerts, so the topic is derived
 from a random pairing code. Messages are signed (HMAC-SHA256 with the pairing code), so the app
 rejects anything not produced by this PC, and the signal id + expiry stop replays.
 
-Wire format (one alert):
-    AYESHA BUY OANDA:EURUSD TF=15 E=... SL=... TP=... RR=... LOT=0.00 EXP=8 SRC=PDL TGT=ASIA_H BAR=<ms>
-        QUSD=1 ST=READY FROM=PC ID=<signal_id> EXPU=<ms> BLK=<codes> V=<hash>
+Wire format 4 (one alert):
+    AYESHA BUY OANDA:EURUSD TF=15 E=... SL=... TP=... RR=... LOT=0.00 EXP=0 SRC=PDL TGT=ASIA_H BAR=<ms>
+        ST=READY FROM=PC ID=<signal_id> EXPU=<ms> BLK=<codes> MTF=<...> WF=4 NP=<news phase>
+        NE=<event id|NONE> NT=<event ms|0> NI=<impact|NONE> NV=<calendar fetch ms|0>
+        CAPV=<snapshot version|0> CAPT=<snapshot ms|0> CAPH=<digest|NA> RISKP=<risk %> SPEC=<OWNER|ASSUMED|MT5> V=<hash>
     Why: ...
     SIG=<hex>
+News watch (information only, never a trade signal):
+    AYESHA NEWS ID=<event id> CCY=USD IMP=HIGH TIER=TOP_DATA T=<ms> PH=UPCOMING|PRE_EVENT_LOCKOUT|RELEASED|WINDOW_END
+        ST=<event state> WS=<ms> WE=<ms> SRC=<provider> VER=<ms> PAIRS=EURUSD,USDJPY SENT=<ms> V=<hash>
+    Title: ... / Forecast: ... / Scenario: ... / Reaction: ... / Protection: ...
+    SIG=<hex>
 Heartbeat:
-    AYESHA HB T=<ms> STATE=OK|DATA_STALE|FEED_OFFLINE|STOPPED PAIRS=<n> V=<hash>
+    AYESHA HB T=<ms> STATE=OK|DATA_STALE|FEED_OFFLINE|STOPPED PAIRS=<n> V=<hash> CAP=OK|STALE|MISSING|...
     SIG=<hex>
 The signature covers every byte before "\\nSIG=".
 """
@@ -66,8 +74,16 @@ def verify(code: str, message: str) -> str | None:
     return body
 
 
-def _ms(iso: str) -> int:
-    return int(datetime.fromisoformat(iso).timestamp() * 1000)
+WIRE_FORMAT = 4
+
+
+def _ms(iso: str | None) -> int:
+    return int(datetime.fromisoformat(iso).timestamp() * 1000) if iso else 0
+
+
+def _tok(v: Any, default: str = "NA") -> str:
+    t = str(v if v not in (None, "") else default)
+    return "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in t)[:40]
 
 
 def _fmt(x: float, pair: str) -> str:
@@ -76,7 +92,7 @@ def _fmt(x: float, pair: str) -> str:
 
 # PC record status -> phone status (ST=). The phone only knows READY / WATCH / NO_TRADE from the PC.
 WIRE_STATUS = {"READY": "READY", "NOTIFIED": "READY", "WATCH": "WATCH", "WATCH_M5": "WATCH",
-               "NO_TRADE": "NO_TRADE", "CONFIRM_FAILED": "NO_TRADE"}
+               "NO_TRADE": "NO_TRADE", "CONFIRM_FAILED": "NO_TRADE", "INVALIDATED": "NO_TRADE"}
 MTF_KEYS = (("H4", "H4"), ("H1", "H1"), ("H1_LAST", "H1L"), ("H1_ZONE", "Z"), ("M15", "M15"), ("M5", "M5"))
 
 
@@ -92,28 +108,74 @@ def format_mtf(mtf: dict[str, str] | None) -> str:
     return ",".join(parts) or "NA"
 
 
-def format_push(rec: dict[str, Any], tf_minutes: int = 15) -> str:
-    """Canonical PC signal record -> AYESHA line format the phone parser reads."""
+def _spec_kind(source: str | None) -> str:
+    s = source or ""
+    return "MT5" if s.startswith("MT5") else "OWNER" if s.startswith("OWNER_CONFIRMED:") else "ASSUMED"
+
+
+def format_push(rec: dict[str, Any], tf_minutes: int = 15, code: str | None = None) -> str:
+    """Canonical PC signal record -> AYESHA line format the phone parser reads.
+    `code` (pairing code) keys the capital digest; without it CAPH=NA."""
     pair = rec["pair"]
     tp = rec["take_profits"][-1]
     blk = ",".join(rec.get("blockers") or []) or "NONE"
     st = WIRE_STATUS.get(rec["status"], "NO_TRADE")
+    ev = rec.get("news_event") or {}
+    eq = rec.get("capital_equity_usd")
+    if code and eq:
+        from ayesha.capital import digest
+
+        caph = digest(code, eq)
+    else:
+        caph = "NA"
     head = (f"AYESHA {rec['direction']} OANDA:{pair} TF={tf_minutes} E={_fmt(rec['entry'], pair)} "
             f"SL={_fmt(rec['stop_loss'], pair)} TP={_fmt(tp, pair)} RR={(rec.get('net_rr') or 0):.2f} "
             f"LOT={(rec.get('safe_lot') or 0):.2f} EXP=0 SRC={rec.get('liquidity_source') or 'NA'} "
             f"TGT={rec.get('target_name') or 'NA'} BAR={_ms(rec['event_time_utc'])} ST={st} FROM=PC "
             f"ID={rec['signal_id']} EXPU={_ms(rec['expires_at_utc'])} BLK={blk} MTF={format_mtf(rec.get('mtf'))} "
+            f"WF={WIRE_FORMAT} NP={_tok(rec.get('news_phase'), 'NEWS_UNVERIFIED')} NE={_tok(ev.get('event_id'), 'NONE')} "
+            f"NT={_ms(ev.get('time_utc'))} NI={_tok(ev.get('impact'), 'NONE')} NV={_ms(rec.get('news_verified_at_utc'))} "
+            f"CAPV={rec.get('capital_snapshot_version') or 0} CAPT={_ms(rec.get('capital_verified_at_utc'))} "
+            f"CAPH={caph} RISKP={rec.get('risk_percent', 0)} SPEC={_spec_kind(rec.get('contract_spec_source'))} "
             f"V={rec['strategy_hash']}")
     why = (f"Why: {rec.get('setup', 'SWEEP_MSS_FVG')} score {rec.get('score_points')}/100 (rule points, not a probability); "
-           f"news {rec.get('news_verification')}; spread {rec.get('spread_pips')} pips (data feed)"
+           f"news {rec.get('news_phase') or rec.get('news_verification')}; spread {rec.get('spread_pips')} pips (data feed)"
            + ("; waiting for M5 confirmation, not an entry yet" if rec["status"] == "WATCH_M5" else "")
            + ("; M5-confirmed: market entry near E, only for a few minutes"
-              if rec.get("entry_type") == "MARKET_AFTER_M5_CONFIRMATION" and st == "READY" else ""))
-    return head + "\n" + why
+              if rec.get("entry_type") == "MARKET_AFTER_M5_CONFIRMATION" and st == "READY" else "")
+           + ("; INVALIDATED before entry: do not take it" if rec["status"] == "INVALIDATED" else ""))
+    lines = [head, why]
+    sc = rec.get("news_scenario")
+    if sc and sc.get("summary"):
+        lines.append("News: " + f"{sc.get('title')} ({sc.get('currency')}, {sc.get('impact')}). " + sc["summary"])
+    return "\n".join(lines)
 
 
-def format_heartbeat(t_ms: int, state: str, pairs: int, strategy_hash: str) -> str:
-    return f"AYESHA HB T={t_ms} STATE={state} PAIRS={pairs} V={strategy_hash}"
+def format_news(n: dict[str, Any], strategy_hash: str) -> str:
+    """News Watch message: information and protection status only, never BUY/SELL."""
+    head = (f"AYESHA NEWS ID={_tok(n['event_id'])} CCY={_tok(n['currency'])} IMP={_tok(n['impact'])} "
+            f"TIER={_tok(n['tier'])} T={_ms(n['time_utc'])} PH={n['phase']} ST={_tok(n.get('state'), 'SCHEDULED')} "
+            f"WS={_ms(n['window_start_utc'])} WE={_ms(n['window_end_utc'])} SRC={_tok(n.get('provider'))} "
+            f"VER={_ms(n.get('verified_at_utc'))} PAIRS={','.join(n['pairs'])} SENT={_ms(n['sent_at_utc'])} "
+            f"V={strategy_hash}")
+    lines = [head, "Title: " + " ".join(str(n["title"]).split())[:120],
+             f"Forecast: {n.get('forecast') or 'NA'} | Previous: {n.get('previous') or 'NA'}"]
+    sc = n.get("scenario")
+    if sc:
+        lines.append("Scenario: " + sc.get("summary", "Direction unknown; protection active."))
+    r = n.get("reaction")
+    if r:
+        lines.append(f"Reaction: {r.get('state', 'UNAVAILABLE')}; surprise {r.get('surprise') or 'NA'}; "
+                     f"{r.get('symbol', '')} move {r.get('observed_pair_move') or 'NA'} ({r.get('observed_atr') or 'NA'} ATR); "
+                     f"settled {'yes' if r.get('market_settled') else 'no'}")
+    lines.append("Protection: new trades blocked on " + ", ".join(n["pairs"]) +
+                 " during the window and until spread and volatility settle. Review any open trade, stop-loss "
+                 "and possible gap/slippage. Not a trade signal.")
+    return "\n".join(lines)
+
+
+def format_heartbeat(t_ms: int, state: str, pairs: int, strategy_hash: str, capital: str = "") -> str:
+    return f"AYESHA HB T={t_ms} STATE={state} PAIRS={pairs} V={strategy_hash}" + (f" CAP={_tok(capital)}" if capital else "")
 
 
 class NtfyNotifier:
@@ -123,11 +185,12 @@ class NtfyNotifier:
     channel = "ntfy"
     archive_non_ready = True
 
-    def __init__(self, code: str, server: str = NTFY, timeout: float = 10, post=None) -> None:
+    def __init__(self, code: str, server: str = NTFY, timeout: float = 10, post=None, strategy_hash: str = "") -> None:
         self.code = normalize_code(code)
         self.url = f"{server.rstrip('/')}/{topic_for(self.code)}"
         self.timeout = timeout
         self._post = post or self._http_post
+        self.strategy_hash = strategy_hash
 
     def _http_post(self, url: str, data: bytes, headers: dict[str, str]) -> int:
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
@@ -143,10 +206,14 @@ class NtfyNotifier:
             return False, type(e).__name__
 
     def send(self, rec: dict[str, Any]) -> tuple[bool, str]:
-        return self.publish(format_push(rec), "high" if rec["status"] == "READY" else "low")
+        return self.publish(format_push(rec, code=self.code), "high" if rec["status"] == "READY" else "low")
 
-    def heartbeat(self, t_ms: int, state: str, pairs: int, strategy_hash: str) -> tuple[bool, str]:
-        return self.publish(format_heartbeat(t_ms, state, pairs, strategy_hash), "min")
+    def news(self, notice: dict[str, Any], strategy_hash: str = "") -> tuple[bool, str]:
+        return self.publish(format_news(notice, strategy_hash or self.strategy_hash), "default")
+
+    def heartbeat(self, t_ms: int, state: str, pairs: int, strategy_hash: str, capital: str = "") -> tuple[bool, str]:
+        self.strategy_hash = strategy_hash
+        return self.publish(format_heartbeat(t_ms, state, pairs, strategy_hash, capital), "min")
 
 
 def default_code_path() -> Path:

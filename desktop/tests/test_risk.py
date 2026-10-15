@@ -5,12 +5,17 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from ayesha.feed.static_specs import assumed_fx_spec
-from ayesha.models import AccountState
+from ayesha.models import AccountState as _AccountState
 from ayesha.risk.engine import RiskConfig, TradeProposal, broker_order_prices, evaluate, floor_to_step
 
 CFG = RiskConfig()
 EU = assumed_fx_spec("EURUSD", 1.08)
-EU_MT5 = replace(EU, source="MT5:EURUSDm")
+EU_MT5 = replace(EU, source="MT5:EURUSDm", margin_per_lot=540.0)  # 1:200
+
+
+def AccountState(equity, **kw):  # noqa: N802 - free margin known (no open trades) unless a test says otherwise
+    kw.setdefault("free_margin_usd", equity)
+    return _AccountState(equity, **kw)
 
 
 def prop(**kw):
@@ -30,7 +35,7 @@ def test_spec_small_account_example_is_no_trade():
 
 
 def test_cent_account_makes_small_equity_tradeable():
-    cent = replace(assumed_fx_spec("EURUSD", 1.08, "StandardCent"), source="MT5:EURUSDc")
+    cent = replace(assumed_fx_spec("EURUSD", 1.08, "StandardCent"), source="MT5:EURUSDc", margin_per_lot=5.4)
     d = evaluate(prop(), cent, AccountState(25), CFG)
     assert d.ok, d.blockers
     assert d.max_loss_usd <= d.risk_budget_usd
@@ -97,7 +102,7 @@ def test_invalid_levels():
 
 
 def test_unverified_spec_blocks_live_but_not_research():
-    assert "CONTRACT_SPEC_UNVERIFIED" in evaluate(prop(), EU, AccountState(10_000), CFG).blockers
+    assert "BROKER_SPEC_UNVERIFIED" in evaluate(prop(), EU, AccountState(10_000), CFG).blockers
     assert evaluate(prop(), EU, AccountState(10_000), CFG, live=False).ok
 
 
@@ -111,14 +116,21 @@ def test_daily_pause_after_two_losses():
     assert "DAILY_RISK_PAUSE" in d.blockers
 
 
-def test_daily_loss_cap():
+def test_daily_loss_cap_shrinks_then_pauses():
+    # $10k, 2% daily cap = $200. After $180 realized loss only $20 of budget remains (spec B2 formula).
     d = evaluate(prop(), EU_MT5, AccountState(10_000, realized_loss_today_usd=180), CFG)
-    assert "DAILY_RISK_PAUSE" in d.blockers  # 180 + 50 > 200 (2%)
+    assert d.nominal_budget_usd == pytest.approx(50) and d.risk_budget_usd == pytest.approx(20)
+    assert d.budget_limited_by == "DAILY_LOSS_LIMIT" and d.max_loss_usd <= 20 + 1e-9
+    d2 = evaluate(prop(), EU_MT5, AccountState(10_000, realized_loss_today_usd=200), CFG)
+    assert "DAILY_RISK_PAUSE" in d2.blockers and d2.lot == 0
 
 
-def test_open_risk_cap():
+def test_open_risk_cap_shrinks_then_blocks():
     d = evaluate(prop(), EU_MT5, AccountState(10_000, open_risk_usd=80), CFG)
-    assert "OPEN_RISK_CAP" in d.blockers
+    assert d.risk_budget_usd == pytest.approx(20) and d.budget_limited_by == "OPEN_RISK_LIMIT"
+    assert d.max_loss_usd <= 20 + 1e-9
+    d2 = evaluate(prop(), EU_MT5, AccountState(10_000, open_risk_usd=100), CFG)
+    assert "OPEN_RISK_CAP" in d2.blockers and d2.lot == 0
 
 
 def test_correlated_usd_exposure():
