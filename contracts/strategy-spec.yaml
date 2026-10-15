@@ -1,7 +1,7 @@
 # AYESHA canonical strategy contract.
 # Python loads this file at runtime; Pine constants are generated from it (phase 6).
 # Any change here changes strategy_hash, which is shown in every signal.
-strategy_version: "0.3.0"
+strategy_version: "0.4.0"
 
 account:
   broker: Exness
@@ -72,10 +72,43 @@ mtf:   # one combined setup per pair; higher timeframes give context, never thei
     enabled: false              # NOT validated; the scanner refuses to run with this on
     validated: false
 
-news:
-  block_minutes_before: 30
+news:   # protection only; news analysis (scenarios, reactions) is advisory and never gates a trade
+  rules_version: "1.0"
+  block_minutes_before: 30      # legacy HIGH-impact window: the floor for every HIGH+ tier below
   block_minutes_after: 30
   impacts_blocked: [HIGH]
+  tiers:   # minutes; proposed research defaults (News spec A2), NOT statistically optimised
+    CENTRAL_BANK: {before: 45, after: 60}   # rate decisions, FOMC, policy statements, press conferences
+    TOP_DATA:     {before: 45, after: 30}   # CPI, non-farm payrolls, core PCE
+    HIGH:         {before: 30, after: 30}
+    MEDIUM:       {before: 10, after: 10}
+    LOW:          {before: 0, after: 0}     # informational; blocks only if M5 shows a shock
+  global_currencies: [USD]      # TOP_DATA / CENTRAL_BANK USD events block every enabled pair
+  upcoming_notice_minutes: 60   # UPCOMING phase + phone notice; a READY must expire before a lockout
+  event_live_minutes: 5
+  reaction_watch_max_minutes: 120   # pre-event baseline compared for at most this long after the window;
+                                    # later the always-on gates (hard spread cap, quote age) still apply
+  source_max_age_hours: 24      # older calendar => NEWS_UNVERIFIED
+  max_clock_skew_minutes: 5
+  stability:   # REACTION_WATCH -> CLEAR needs closed M5 bars near the pre-event baseline
+    baseline_minutes: 120
+    min_baseline_bars: 12
+    closed_bars_after: 2
+    spread_ratio_max: 1.5
+    spread_abs_slack_pips: 0.2
+    range_ratio_max: 2.0
+    shock_ratio: 3.0            # low/medium event with an M5 range > 3x baseline is treated as high risk
+    whipsaw_ratio: 3.0          # big moves both ways after the release: blocked for the whole reaction watch
+    shock_extend_minutes: 30    # a shock bar extends the cooldown by this long after it closes
+
+capital:   # Exness equity typed by the owner (no broker API); OANDA's practice balance is never used
+  rules_version: "1.0"
+  source: OWNER_ENTERED
+  max_age_hours: 24             # a READY needs a capital confirmation younger than this
+  max_age_after_change_hours: 4 # ... or this, after a deposit/withdrawal or a large change
+  large_change_percent: 25
+  positions_max_age_hours: 12   # open trades / free margin confirmed once per session
+  news_leverage_cap: 200        # margin is checked at no more than 1:200 (Exness limits leverage around news)
 
 scoring:
   a_plus: 85

@@ -7,6 +7,11 @@ week the file describes; outside it the calendar returns UNKNOWN (strict mode th
 
 If the fetch fails and the cache is older than `max_age`, the calendar is treated as missing:
 signals become NEWS_UNVERIFIED, never "no news".
+
+The export carries `forecast` and `previous` as text, timestamped here by the fetch time (as-of).
+It does NOT carry a publication-verified `actual`, so actual-vs-forecast analysis is BLOCKED BY
+DATA with this source; any `actual` field it may contain is ignored. Every refresh goes through the
+event ledger (`ayesha.news.ledger`), so moved, dropped or downgraded events are never silent.
 """
 
 from __future__ import annotations
@@ -18,22 +23,35 @@ from pathlib import Path
 from typing import Callable
 
 from ayesha.news.calendar import NewsCalendar, NewsEvent
+from ayesha.news.ledger import reconcile
 
 FF_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+PROVIDER = "FOREXFACTORY_WEEKLY_EXPORT"
 IMPACT = {"high": "HIGH", "medium": "MEDIUM", "low": "LOW", "holiday": "LOW", "non-economic": "LOW"}
 
 
-def parse_ff(items: list[dict]) -> list[NewsEvent]:
+def _txt(v) -> str | None:
+    s = str(v).strip() if v is not None else ""
+    return s or None
+
+
+def parse_ff(items: list[dict], fetched_at: datetime | None = None) -> list[NewsEvent]:
     evs = []
     for it in items:
+        if not isinstance(it, dict):
+            continue
         try:
             t = datetime.fromisoformat(str(it["date"]).replace("Z", "+00:00"))
         except (KeyError, ValueError):
             continue
         if t.tzinfo is None:
             continue  # unknown zone: skip rather than guess
-        evs.append(NewsEvent(t.astimezone(timezone.utc), str(it.get("country", "")).upper(),
-                             IMPACT.get(str(it.get("impact", "")).lower(), "LOW"), str(it.get("title", ""))))
+        raw_impact = str(it.get("impact", "")).lower()
+        evs.append(NewsEvent(t.astimezone(timezone.utc), str(it.get("country", "")).strip().upper(),
+                             IMPACT.get(raw_impact, "HIGH"),  # unknown impact tag: assume HIGH, never LOW
+                             str(it.get("title", "")).strip(), provider=PROVIDER,
+                             forecast=_txt(it.get("forecast")), previous=_txt(it.get("previous")),
+                             fetched_at=fetched_at))
     return evs
 
 
@@ -49,10 +67,11 @@ def week_coverage(evs: list[NewsEvent]) -> tuple[datetime, datetime]:
 
 
 class FFCalendarSource:
-    def __init__(self, cache_path: Path, url: str = FF_URL, fetch: Callable[[str], bytes] | None = None,
+    def __init__(self, cache_path: Path, url: str = FF_URL, ledger_path: Path | None = None, fetch: Callable[[str], bytes] | None = None,
                  clock: Callable[[], datetime] | None = None, min_refetch: timedelta = timedelta(hours=1),
                  max_age: timedelta = timedelta(hours=24)) -> None:
         self.cache = Path(cache_path)
+        self.ledger_path = Path(ledger_path) if ledger_path else self.cache.with_name("news-ledger.json")
         self.url = url
         self._fetch = fetch or self._http
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -88,8 +107,17 @@ class FFCalendarSource:
                 self.last_error = f"{type(e).__name__}: {e}"
         if cached is None or now - cached[0] > self.max_age:
             return None
-        evs = parse_ff(cached[1])
+        evs = parse_ff(cached[1], cached[0])
         if not evs:
             return None
         start, end = week_coverage(evs)
-        return NewsCalendar(evs, start, end, **kw)
+        try:
+            led = json.loads(self.ledger_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            led = {}
+        led, evs = reconcile(led, evs, cached[0], (start, end))
+        try:
+            self.ledger_path.write_text(json.dumps(led, indent=1), encoding="utf-8")
+        except OSError as e:
+            self.last_error = f"ledger not saved: {e}"
+        return NewsCalendar(evs, start, end, provider=PROVIDER, fetched_at=cached[0], **kw)
