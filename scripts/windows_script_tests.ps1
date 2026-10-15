@@ -65,3 +65,5 @@ Expect "after token removal the scanner stops with a config error" (Run "start-a
 
 if ($script:failed -gt 0) { Write-Host "$script:failed scenario(s) failed"; exit 1 }
 Write-Host "All Windows script scenarios passed."
+# Native commands above leave $LASTEXITCODE non-zero on purpose; the result is the scenario count.
+exit 0
