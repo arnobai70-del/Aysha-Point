@@ -1,0 +1,120 @@
+package com.ayesha.fx
+
+import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.text.format.DateFormat
+import android.widget.LinearLayout
+import android.widget.Toast
+import com.ayesha.fx.core.LotCalc
+import java.util.Date
+import java.util.Locale
+
+/** Full signal details: levels, reasons, lot from the owner's settings, open TradingView. */
+class DetailActivity : Activity() {
+    companion object {
+        const val EXTRA_ID = "id"
+    }
+
+    private lateinit var col: LinearLayout
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val (sv, c) = Ui.screen(this)
+        col = c
+        setContentView(sv)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        render()
+    }
+
+    private fun f2(v: Double) = String.format(Locale.US, "%.2f", v)
+
+    private fun render() {
+        col.removeAllViews()
+        val id = intent.getStringExtra(EXTRA_ID)
+        val e = id?.let { AlertStore(this).get(it) }
+        if (e == null) {
+            col.addView(Ui.text(this, "সিগন্যাল পাওয়া যায়নি", 16f))
+            return
+        }
+        val a = e.alert
+        title = "${a.direction} ${a.ticker}"
+        val now = System.currentTimeMillis()
+        val expired = a.isExpired(now)
+        val prefs = Prefs(this)
+
+        val head = Ui.card(this, if (expired) Ui.OFF else if (a.isBuy) Ui.BULL else Ui.BEAR)
+        head.addView(Ui.text(this, (if (a.isBuy) "🟢 " else "🔴 ") + "${a.direction} ${a.ticker}" + (if (a.isTest) " · TEST" else ""), 22f, bold = true))
+        val recv = DateFormat.format("dd MMM yyyy HH:mm", Date(a.receivedAtMs))
+        val exp = DateFormat.format("HH:mm", Date(a.expiresAtMs))
+        head.addView(Ui.text(this, "এসেছে $recv · ${a.timeframe}m চার্ট", 13f, Ui.MUTED))
+        head.addView(Ui.text(this,
+            if (expired) "⌛ মেয়াদ শেষ ($exp)। এখন আর এই entry নেবেন না।" else "⏳ $exp পর্যন্ত বৈধ। দাম entry থেকে অনেক দূরে চলে গেলে পিছনে দৌড়াবেন না।",
+            14f, if (expired) Ui.WATCH else Ui.TEXT))
+        col.addView(head)
+
+        val lv = Ui.card(this, Ui.SKY)
+        lv.addView(Ui.text(this, "লেভেল (TradingView চার্টের দাম)", 13f, Ui.MUTED))
+        lv.addView(Ui.text(this, "Entry  ${a.fmt(a.entry)}", 18f, Ui.SKY, bold = true))
+        lv.addView(Ui.text(this, "SL       ${a.fmt(a.stop)}", 18f, Ui.BEAR, bold = true))
+        lv.addView(Ui.text(this, "TP       ${a.fmt(a.target)}  (${a.targetName})", 18f, Ui.BULL, bold = true))
+        lv.addView(Ui.text(this, "RR ${f2(a.rr)} (আন্দাজি spread সহ)", 14f))
+        col.addView(lv)
+
+        val risk = Ui.card(this, Ui.WATCH)
+        risk.addView(Ui.text(this, "লট (আপনার settings থেকে)", 13f, Ui.MUTED))
+        val r = LotCalc.calc(a.ticker, a.entry, a.stop, prefs.equityUsd, prefs.riskPercent, prefs.accountType,
+            prefs.spreadPips, prefs.slippagePips)
+        if (r == null) {
+            risk.addView(Ui.text(this, "এই পেয়ারের লট ফোনে হিসাব হয় না। চার্টের আন্দাজ: ${a.chartLot}", 15f))
+        } else if (r.ok) {
+            risk.addView(Ui.text(this, "Lot ${f2(r.lot)}  ·  সর্বোচ্চ লস \$${f2(r.maxLossUsd)}", 18f, bold = true))
+            risk.addView(Ui.text(this, "Budget \$${f2(r.budgetUsd)} (${prefs.riskPercent}% of \$${prefs.equityUsd}) · SL ${String.format(Locale.US, "%.1f", r.stopPips)} pips", 13f, Ui.MUTED))
+        } else {
+            risk.addView(Ui.text(this, "⛔ NO TRADE", 20f, Ui.BEAR, bold = true))
+            risk.addView(Ui.text(this, "সবচেয়ে ছোট লট 0.01 নিলেও ঝুঁকি \$${f2(r.minLotLossUsd)} (equity-র ${String.format(Locale.US, "%.1f", r.minLotLossPercent)}%), " +
+                "অথচ আপনার সীমা \$${String.format(Locale.US, "%.3f", r.budgetUsd)}।", 14f))
+        }
+        risk.addView(Ui.text(this, "Exness অ্যাপে আসল spread আর lot মিলিয়ে নিন। বড় নিউজের ৩০ মিনিট আগে-পরে ট্রেড নেবেন না।", 12f, Ui.MUTED))
+        col.addView(risk)
+
+        val why = Ui.card(this, Ui.OFF)
+        why.addView(Ui.text(this, "কেন এই সিগন্যাল", 13f, Ui.MUTED))
+        why.addView(Ui.text(this, "① ${a.source} liquidity sweep হয়েছে\n② উল্টো দিকে MSS (displacement সহ)\n③ FVG-তে entry zone\n④ Target: ${a.targetName}", 15f))
+        if (a.why.isNotBlank()) why.addView(Ui.text(this, a.why, 12f, Ui.MUTED))
+        why.addView(Ui.text(this, "চার্টে ①–④ চিহ্নগুলো দেখতে নিচের বাটন চাপুন।", 12f, Ui.MUTED))
+        col.addView(why)
+
+        col.addView(Ui.button(this, "📈 TradingView-এ ${a.ticker} খুলুন", Ui.SKY) { openTradingView(a.tradingViewUrl()) })
+        col.addView(Ui.button(this, "📋 লেভেল কপি করুন", Ui.OFF) {
+            val cm = getSystemService(ClipboardManager::class.java)
+            cm.setPrimaryClip(ClipData.newPlainText("AYESHA levels", a.levelsText()))
+            Toast.makeText(this, "কপি হয়েছে", Toast.LENGTH_SHORT).show()
+        })
+        col.addView(Ui.row(this,
+            Ui.button(this, "✅ ট্রেড নিয়েছি", Ui.BULL) { AlertStore(this).mark(a.id, "TAKEN"); render() },
+            Ui.button(this, "✖ বাদ", Ui.OFF) { AlertStore(this).mark(a.id, "SKIPPED"); render() },
+        ))
+        col.addView(Ui.text(this, "এই অ্যাপ কখনো অর্ডার দেয় না। সিদ্ধান্ত আপনার।", 12f, Ui.MUTED))
+    }
+
+    private fun openTradingView(url: String) {
+        val uri = Uri.parse(url)
+        val app = Intent(Intent.ACTION_VIEW, uri).setPackage("com.tradingview.tradingviewapp")
+        try {
+            startActivity(app)
+        } catch (ex: Exception) {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, uri))
+            } catch (ex2: Exception) {
+                Toast.makeText(this, "TradingView খোলা গেল না", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+}

@@ -17,7 +17,9 @@ normal, often correct, output.
 2. Create an alert on each pair: Condition **AYESHA → Any alert() function call**, **Notify in app**.
 3. The TradingView phone app shows the alert; open that pair to see the numbered reasons on the chart.
 
-Guide (বাংলা): [`docs/05-tradingview-guide.md`](docs/05-tradingview-guide.md)
+4. Optional phone app: install [`ayesha-fx.apk`](https://github.com/arnobai70-del/Aysha-Point/releases/latest/download/ayesha-fx.apk); it reads the TradingView AYESHA alerts and shows details, lot and an "open TradingView" button.
+
+Guides (বাংলা): [`docs/05-tradingview-guide.md`](docs/05-tradingview-guide.md) · [`docs/06-android-guide.md`](docs/06-android-guide.md)
 
 ## Optional Python tools (phases 1, 2, 4, 5, 6)
 
@@ -39,7 +41,7 @@ desktop/ayesha/  risk/ feed/ (MT5 read-only, CSV) rules/ (primitives, strategy) 
 desktop/tests/   69 tests: risk gates, DST sessions, primitives, zero-lookahead, fills, scanner, safety
 scripts/         check_no_order_api.py (CI fails on any trading call)
 tradingview/     AyeshaSmartMoney.pine (generated chart helper) + template
-android/         phase 8
+android/         Kotlin app (no extra libraries): alert reader, inbox, details, lot calc; APK built by GitHub Actions
 ```
 
 ## Develop

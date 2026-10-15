@@ -1,0 +1,41 @@
+# AYESHA FX Android অ্যাপ (Android 13)
+
+অ্যাপটা আপনার ফোনে TradingView অ্যাপের **AYESHA** নোটিফিকেশন পড়ে নিজের পরিষ্কার নোটিফিকেশন দেখায়।
+সাথে থাকে বিস্তারিত তথ্য, আপনার equity অনুযায়ী লট হিসাব, আর এক চাপে TradingView-এ সেই পেয়ার খোলার বাটন।
+এর জন্য কোনো সার্ভার, MT5 বা Exness লগইন লাগে না। অ্যাপ কখনো অর্ডার দেয় না।
+
+```
+PC: TradingView + AYESHA indicator + alert ("Notify in app")
+        ↓
+ফোন: TradingView অ্যাপ নোটিফিকেশন পায়
+        ↓
+AYESHA FX অ্যাপ সেটা পড়ে → নিজের নোটিফিকেশন + বিস্তারিত + লট
+        ↓
+"TradingView-এ খুলুন" → চার্টে ①–④ কারণ দেখুন → নিজে Exness অ্যাপে সিদ্ধান্ত নিন
+```
+
+## ইনস্টল
+1. ফোনের ব্রাউজারে খুলুন: https://github.com/arnobai70-del/Aysha-Point/releases/latest/download/ayesha-fx.apk
+2. ডাউনলোড হলে ফাইলটা খুলুন। "Unknown apps" অনুমতি চাইলে ব্রাউজারকে allow করুন, তারপর Install।
+3. অ্যাপ খুলে **নোটিফিকেশন allow** করুন।
+4. **অনুমতি দিন (Notification access)** চাপুন, তালিকায় AYESHA FX চালু করুন।
+   - Android 13-এ "Restricted setting" লেখা এলে: Settings → Apps → AYESHA FX → উপরে ডানে ⋮ → **Allow restricted settings**,
+     তারপর আবার Notification access চালু করুন।
+5. **⚙️ Settings**-এ equity, risk %, account type (Standard / Cent) দিন।
+6. **🧪 Test alert** চাপুন। একটা TEST নোটিফিকেশন এলে সব ঠিক আছে।
+
+ফোনে TradingView অ্যাপ ইনস্টল আর লগইন থাকতে হবে, আর তার নোটিফিকেশনও চালু থাকতে হবে।
+
+## আপডেট
+নতুন ভার্সন এলে একই লিংক থেকে নামিয়ে ইনস্টল করুন। "App not installed / signature" error এলে পুরনো অ্যাপ uninstall করে
+নতুনটা ইনস্টল করুন (কারণ: এখনো GitHub-এ নিজের signing key সেট করা হয়নি; নিচে দেখুন)।
+
+## স্থায়ী signing key (ঐচ্ছিক, একবার)
+GitHub repo → Settings → Secrets and variables → Actions-এ চারটা secret দিলে প্রতিটা APK একই key-তে সই হবে,
+uninstall ছাড়াই আপডেট হবে: `AYESHA_KEYSTORE_BASE64`, `AYESHA_KEYSTORE_PASSWORD`, `AYESHA_KEY_ALIAS`, `AYESHA_KEY_PASSWORD`।
+চাইলে বলবেন, keystore বানানোর ধাপ দিয়ে দেব।
+
+## সীমাবদ্ধতা
+- নোটিফিকেশন আসে TradingView-এর মাধ্যমে, তাই দেরি হতে পারে বা না-ও আসতে পারে। ফোন বা ইন্টারনেট বন্ধ থাকলে আসবে না।
+- লট শুধু আন্দাজ (Exness-এর সাধারণ contract size ধরে)। EURJPY-র মতো cross পেয়ারে ফোন লট হিসাব করে না, চার্টের আন্দাজ দেখায়।
+- নিউজ ক্যালেন্ডার দেখা হয় না। বড় নিউজের আগে-পরে ট্রেড নেবেন না।

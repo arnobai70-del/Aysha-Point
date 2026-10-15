@@ -389,7 +389,9 @@ buildPlan(int d, int swBar, float swExt, string swName) =>
             if array.size(plans) > keepPlans
                 deletePlan(array.shift(plans))
             state := dir + (ok ? " SETUP" : " (NO TRADE: lot)")
-            msg := "AYESHA " + dir + " " + syminfo.ticker + " " + timeframe.period + "m\n" + "Why: 1) " + swName + " swept 2) MSS " + (d == 1 ? "up" : "down") + " with displacement 3) FVG entry zone\n" + "Entry " + str.tostring(entry, f) + " | SL " + str.tostring(stop, f) + " | TP " + str.tostring(bestT, f) + " | RR " + str.tostring(bestRR, "#.##") + "\n" + lotTxt + "\nValid " + str.tostring(expiryBars) + " bars. Check news + Exness spread. Open " + syminfo.ticker + " on TradingView to see steps 1-4."
+            // line 1 is machine-readable for the AYESHA phone app; keep keys stable (KEY=value, space separated)
+            head = "AYESHA " + dir + " " + syminfo.prefix + ":" + syminfo.ticker + " TF=" + timeframe.period + " E=" + str.tostring(entry, f) + " SL=" + str.tostring(stop, f) + " TP=" + str.tostring(bestT, f) + " RR=" + str.tostring(bestRR, "#.##") + " LOT=" + str.tostring(ok ? lot : 0.0, "#.##") + " EXP=" + str.tostring(expiryBars) + " SRC=" + swName + " TGT=" + bestName + " V=" + STRATEGY_HASH
+            msg := head + "\n" + "Why: 1) " + swName + " swept 2) MSS " + (d == 1 ? "up" : "down") + " with displacement 3) FVG entry zone\n" + lotTxt + "\nCheck news + Exness spread. Open " + syminfo.ticker + " on TradingView to see steps 1-4."
     [state, msg, ok]
 
 if barstate.isconfirmed
