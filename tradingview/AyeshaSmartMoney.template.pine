@@ -457,16 +457,22 @@ htfConfirmed() =>
     x = htfTrend()
     x[1]
 bias = request.security(syminfo.tickerid, "{{entry.bias_tv}}", htfConfirmed(), lookahead = barmerge.lookahead_on)
+// H4 context: same confirmed-bar pattern. Shown for context only; the PC scanner decides alignment rules.
+ctxTrend = request.security(syminfo.tickerid, "{{mtf.context_tv}}", htfConfirmed(), lookahead = barmerge.lookahead_on)
 
 // ---------------------------------------------------------------- status table
-var table tb = table.new(position.top_right, 2, 8, bgcolor = color.new(color.black, 35), border_width = 1)
+var table tb = table.new(position.top_right, 2, 10, bgcolor = color.new(color.black, 35), border_width = 1)
 if barstate.islast
     sessTxt = londonNow and nyNow ? "LDN+NY" : londonNow ? "LONDON" : nyNow ? "NEW YORK" : tokyoNow ? "TOKYO" : "OFF"
     table.cell(tb, 0, 0, "PAIR", text_color = color.silver, text_size = size.small)
     table.cell(tb, 1, 0, syminfo.ticker, text_color = color.white, text_size = size.small)
     table.cell(tb, 0, 1, "SESSION", text_color = color.silver, text_size = size.small)
     table.cell(tb, 1, 1, sessTxt, text_color = color.white, text_size = size.small)
-    table.cell(tb, 0, 2, "HTF BIAS", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 0, 8, "H4 CONTEXT", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 8, ctxTrend == 1 ? "UP ▲" : ctxTrend == -1 ? "DOWN ▼" : "RANGE", text_color = ctxTrend == 1 ? colBull : ctxTrend == -1 ? colBear : color.white, text_size = size.small)
+    table.cell(tb, 0, 9, "FEED NOTE", text_color = color.silver, text_size = size.small)
+    table.cell(tb, 1, 9, syminfo.prefix == "OANDA" ? "same feed as PC (OANDA)" : syminfo.prefix + " feed: may differ from PC (OANDA) and Exness", text_color = syminfo.prefix == "OANDA" ? color.white : colWatch, text_size = size.small)
+    table.cell(tb, 0, 2, "H1 BIAS", text_color = color.silver, text_size = size.small)
     table.cell(tb, 1, 2, bias == 1 ? "BULL ▲" : bias == -1 ? "BEAR ▼" : "NEUTRAL", text_color = bias == 1 ? colBull : bias == -1 ? colBear : color.white, text_size = size.small)
     table.cell(tb, 0, 3, "SETUP", text_color = color.silver, text_size = size.small)
     table.cell(tb, 1, 3, setupState, text_color = colWatch, text_size = size.small)

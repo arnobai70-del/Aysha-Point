@@ -1,25 +1,34 @@
 """Live PC scanner (master spec sections M, Q, X). Advisory only.
 
-Loop: for each enabled pair, read newly CLOSED bars, run the setup, apply the risk engine
-with live account/quote/news state, persist every candidate (READY / WATCH / NO_TRADE),
-alert once per READY signal, and track lifecycle (EXPIRED / MISSED / ENTRY_TOUCHED /
-OBSERVED_TP / OBSERVED_SL). Observations are market observations, not broker fills.
+Loop: for each enabled pair, read newly CLOSED base bars (M15, or M5 when M5 confirmation is
+on), run the multi-timeframe engine, apply the risk engine with live account/quote/news state,
+persist every candidate (READY / WATCH / WATCH_M5 / NO_TRADE / CONFIRM_FAILED), alert once per
+READY signal, and track lifecycle (EXPIRED / MISSED / ENTRY_TOUCHED / OBSERVED_TP / OBSERVED_SL).
+Observations are market observations, not broker fills.
+
+READY is additionally guarded by `_ready_guard`, independent of configuration: it needs a
+CLEAR news check, a verified contract spec, a fresh quote, fresh data, a lot > 0 and no
+blockers. Anything else is NO_TRADE with a READY_GUARD:<reason> blocker.
 """
 
 from __future__ import annotations
 
 import time as _time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Protocol
 
+from ayesha.broker import is_verified_source
 from ayesha.models import AccountState, Candle, InstrumentSpec, Quote
 from ayesha.news.calendar import NewsCalendar
 from ayesha.risk.engine import RiskConfig, RiskDecision, TradeProposal, broker_order_prices, evaluate
-from ayesha.rules.strategy import TF_MINUTES, Signal, SweepMssFvg
+from ayesha.rules.mtf import Event, MtfEngine, check_scalp
+from ayesha.rules.strategy import TF_MINUTES, Signal
 from ayesha.sessions import SessionEngine
 from ayesha.storage.db import Registry
 
-ACTIVE = ("READY", "NOTIFIED", "WATCH", "ENTRY_TOUCHED")
+ACTIVE = ("READY", "NOTIFIED", "WATCH", "ENTRY_TOUCHED", "WATCH_M5")
+CONFIRMED_EXPIRY_BARS = 3  # a confirmed (market) entry is only valid for a few base bars
 
 
 class Feed(Protocol):
@@ -36,10 +45,14 @@ class Scanner:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.cfg = RiskConfig.from_spec(spec)
         self.sessions = SessionEngine(spec)
-        self.tf_name = spec["entry"]["setup_timeframe"]
+        check_scalp(spec)
+        self.setup_tf_name = spec["entry"]["setup_timeframe"]
+        self.setup_tf = timedelta(minutes=TF_MINUTES[self.setup_tf_name])
+        self.confirm_tf = (spec.get("mtf") or {}).get("confirm_timeframe") or None
+        self.tf_name = self.confirm_tf or self.setup_tf_name  # base bars the engine is fed
         self.tf = timedelta(minutes=TF_MINUTES[self.tf_name])
         self.pairs = [p.upper() for p in spec["pairs"]["enabled"]]
-        self.strats: dict[str, SweepMssFvg] = {}
+        self.strats: dict[str, MtfEngine] = {}
         self.last_bar: dict[str, datetime] = {}
         self.inst: dict[str, InstrumentSpec] = {}
         self.notify_grades = set(spec.get("delivery", {}).get("notify_grades", ["A_PLUS"]))
@@ -55,12 +68,12 @@ class Scanner:
         for sym in self.pairs:
             try:
                 self.inst[sym] = self.feed.instrument(sym)
-                strat = SweepMssFvg(sym, self.spec)
+                strat = MtfEngine(sym, self.spec)
                 bars = self._closed(self.feed.candles(sym, self.tf_name, start, now), now)
                 for c in bars:
-                    for sig in strat.on_bar(c):
-                        if sig.bar_close_utc >= now - self.tf:  # just closed: still actionable
-                            self._handle(sig, c)
+                    for ev in strat.on_bar(c):
+                        if ev.signal.bar_close_utc >= now - self.tf:  # just closed: still actionable
+                            self._event(ev, c)
                     self._lifecycle(sym, c)
                 self.strats[sym] = strat
                 self.last_bar[sym] = bars[-1].time if bars else start
@@ -83,8 +96,8 @@ class Scanner:
                 bars = self._closed(self.feed.candles(sym, self.tf_name, self.last_bar[sym] + self.tf, now), now)
                 bars = [b for b in bars if b.time > self.last_bar[sym]]
                 for c in bars:
-                    for sig in strat.on_bar(c):
-                        self._handle(sig, c)
+                    for ev in strat.on_bar(c):
+                        self._event(ev, c)
                     self._lifecycle(sym, c)
                     self.last_bar[sym] = c.time
                     n += 1
@@ -97,8 +110,18 @@ class Scanner:
             except Exception as e:
                 self.reg.health("FEED_OFFLINE", sym, f"{type(e).__name__}: {e}")
                 self.state[sym] = "FEED_OFFLINE"
+        self.retry_deliveries()
         self.heartbeat()
         return n
+
+    def retry_deliveries(self) -> None:
+        """A READY alert whose push failed (network down) is re-sent on later polls until it expires.
+        Channels that already received it are skipped, so nothing is sent twice."""
+        now = self.clock()
+        for rec in self.reg.active(("READY", "NOTIFIED")):
+            if rec is None or datetime.fromisoformat(rec["expires_at_utc"]) <= now:
+                continue
+            self._deliver(rec)
 
     def overall_state(self) -> str:
         vals = [self.state.get(p, "FEED_OFFLINE") for p in self.pairs]
@@ -148,10 +171,39 @@ class Scanner:
                             realized_loss_today_usd=realized, losses_today=losses, open_risk_usd=open_risk,
                             open_positions=self.reg.open_positions())
 
-    def _handle(self, sig: Signal, bar: Candle) -> dict[str, Any] | None:
+    def _event(self, ev: Event, bar: Candle) -> dict[str, Any] | None:
+        sig = ev.signal
+        if ev.kind == "SETUP":
+            return self._handle(sig, bar, awaiting=ev.needs_confirmation)
+        old = self.reg.get(sig.signal_id)
+        if ev.kind == "CONFIRMED":
+            if old is None:
+                return self._handle(sig, bar)  # setup closed before the scanner started: evaluate fresh
+            if old["status"] != "WATCH_M5":
+                return None  # blocked or already resolved at setup time: a confirmation never un-blocks it
+            rec = self._evaluate(sig, confirmed=True)
+            self.reg.update_signal(rec, f"M5 confirmation -> {rec['status']}")
+            self._deliver(rec)
+            return rec
+        # CONFIRM_FAILED
+        if old is None or old["status"] not in ("WATCH_M5", "WATCH"):
+            return None
+        rec = dict(old, status="CONFIRM_FAILED", blockers=list(old.get("blockers") or []) + [ev.reason],
+                   safe_to_alert_for_entry=False, mtf=dict(sig.mtf))
+        self.reg.update_signal(rec, ev.reason)
+        self._deliver(rec)
+        return rec
+
+    def _handle(self, sig: Signal, bar: Candle, awaiting: bool = False) -> dict[str, Any] | None:
+        rec = self._evaluate(sig, awaiting=awaiting)
+        if not self.reg.insert_signal(rec):
+            return None  # already known: never alert twice
+        self._deliver(rec)
+        return rec
+
+    def _evaluate(self, sig: Signal, awaiting: bool = False, confirmed: bool = False) -> dict[str, Any]:
         now = self.clock()
         sym = sig.symbol
-        blockers: list[str] = []
         try:
             q = self.feed.quote(sym)
             spread, age = q.spread, (now - q.time).total_seconds()
@@ -167,7 +219,7 @@ class Scanner:
         news = "UNKNOWN"
         if self.calendar is not None:
             news, _ = self.calendar.status(sym, now)
-        if news == "CLEAR":
+        if news == "CLEAR" and not sig.score_breakdown.get("news_integrity"):
             sig.score_breakdown["news_integrity"] = 5
             sig.score = sum(sig.score_breakdown.values())
             sc = self.spec["scoring"]
@@ -178,22 +230,41 @@ class Scanner:
             d = evaluate(prop, self.inst[sym], self._account_state(), self.cfg, live=True)
         except Exception as e:
             d = RiskDecision(ok=False, blockers=[f"RISK_ENGINE_ERROR:{type(e).__name__}"])
-        blockers = d.blockers
         if d.ok and sig.grade in self.notify_grades:
-            status = "READY"
+            status = "WATCH_M5" if awaiting else "READY"
         elif d.ok:
             status = "WATCH"
         else:
             status = "NO_TRADE"
-        rec = self._record(sig, d, spread, news, status, q)
-        if not self.reg.insert_signal(rec):
-            return None  # already known: never alert twice
-        self._deliver(rec)
-        return rec
+        if status == "READY":
+            why = self._ready_guard(sym, d, news, age)
+            if why:
+                status = "NO_TRADE"
+                d = replace(d, ok=False, blockers=list(d.blockers) + [f"READY_GUARD:{why}"])
+        return self._record(sig, d, spread, news, status, q, confirmed=confirmed)
+
+    def _ready_guard(self, sym: str, d: RiskDecision, news: str, quote_age: float) -> str | None:
+        """Last line of defence: READY is impossible unless every input is verified, whatever the config says."""
+        if news != "CLEAR":
+            return "NEWS_NOT_VERIFIED_CLEAR"
+        if not is_verified_source(self.inst[sym].source):
+            return "CONTRACT_SPEC_UNVERIFIED"
+        if not (quote_age <= self.cfg.max_quote_age_seconds):
+            return "QUOTE_NOT_FRESH"
+        if self.state.get(sym, "OK") != "OK":
+            return f"DATA_{self.state[sym]}"
+        if not (d.lot and d.lot > 0):
+            return "NO_SAFE_LOT"
+        if d.blockers:
+            return "BLOCKERS_PRESENT"
+        return None
 
     def _record(self, sig: Signal, d: RiskDecision, spread: float, news: str, status: str,
-                q: Quote | None) -> dict[str, Any]:
+                q: Quote | None, confirmed: bool = False) -> dict[str, Any]:
         inst = self.inst[sig.symbol]
+        expires = sig.bar_close_utc + self.setup_tf * self.spec["entry"]["expiry_bars"]
+        if confirmed:
+            expires = min(expires, sig.bar_close_utc + self.tf * CONFIRMED_EXPIRY_BARS)
         return {
             "schema_version": "1.0",
             "signal_id": sig.signal_id,
@@ -203,7 +274,11 @@ class Scanner:
             "broker_symbol": inst.source.split(":", 1)[-1],
             "direction": sig.direction,
             "setup": sig.setup,
-            "timeframe": f"{self.tf_name} (bias {self.spec['entry']['bias_timeframe']})",
+            "timeframe": f"{self.setup_tf_name} (bias {self.spec['entry']['bias_timeframe']}, context "
+                         f"{(self.spec.get('mtf') or {}).get('context_timeframe', 'OFF')}"
+                         f"{', confirm ' + self.confirm_tf if self.confirm_tf else ''})",
+            "mtf": dict(sig.mtf),
+            "entry_type": "MARKET_AFTER_M5_CONFIRMATION" if confirmed else "LIMIT_AT_FVG",
             "event_time_utc": sig.bar_close_utc.isoformat(),
             "session": sig.session,
             "status": status,
@@ -229,24 +304,27 @@ class Scanner:
             "target_name": sig.target_name,
             "data_source": getattr(self.feed, "source_name", "MT5"),
             "contract_spec_source": inst.source,
-            "expires_at_utc": (sig.bar_close_utc + self.tf * self.spec["entry"]["expiry_bars"]).isoformat(),
+            "expires_at_utc": expires.isoformat(),
             "safe_to_alert_for_entry": status == "READY",
         }
 
     def _deliver(self, rec: dict[str, Any]) -> None:
         """READY goes to every channel. Other statuses go only to channels that keep an archive
         (the phone app shows them as 'not alerted, because ...'), never as an entry alert."""
+        ready = rec["status"] in ("READY", "NOTIFIED")
+        out = dict(rec, status="READY") if ready else rec
+        st = out["status"]
         any_ok = False
         for n in self.notifiers:
-            if rec["status"] != "READY" and not getattr(n, "archive_non_ready", False):
+            if not ready and not getattr(n, "archive_non_ready", False):
                 continue
-            if self.reg.was_delivered(rec["signal_id"], n.channel):
+            if self.reg.was_delivered(rec["signal_id"], n.channel, st):
                 continue
             try:
-                ok, detail = n.send(rec)
+                ok, detail = n.send(out)
             except Exception as e:
                 ok, detail = False, type(e).__name__
-            self.reg.record_delivery(rec["signal_id"], n.channel, ok, detail)
+            self.reg.record_delivery(rec["signal_id"], n.channel, ok, detail, st)
             any_ok = any_ok or ok
         if any_ok and rec["status"] == "READY":
             self.reg.set_status(rec["signal_id"], "NOTIFIED")
@@ -261,6 +339,10 @@ class Scanner:
             buy = rec["direction"] == "BUY"
             e, s, t = rec["entry"], rec["stop_loss"], rec["take_profits"][-1]
             sid = rec["signal_id"]
+            if rec["status"] == "WATCH_M5":  # waiting for M5 confirmation: only expiry applies here
+                if c.time + self.tf >= datetime.fromisoformat(rec["expires_at_utc"]):
+                    self.reg.set_status(sid, "EXPIRED", "no M5 confirmation before expiry")
+                continue
             if rec["status"] == "ENTRY_TOUCHED":
                 if (c.low <= s) if buy else (c.high >= s):
                     self.reg.set_status(sid, "OBSERVED_SL", f"bar {c.time.isoformat()}")

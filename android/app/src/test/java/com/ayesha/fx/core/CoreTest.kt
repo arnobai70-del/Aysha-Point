@@ -289,4 +289,105 @@ class CoreTest {
         assertEquals(Assess.UNVERIFIED, Assess.assess(a, a.receivedAtMs, okLot, watch).state)
         assertEquals(Assess.READY, Assess.assess(a, a.receivedAtMs, okLot, watch, expectedHash = "FIXTUREHASH").state)
     }
+
+    // --- v0.4.0 app: multi-timeframe, WATCH, heartbeat replay, status upgrades, journal -------------
+
+    @Test
+    fun fixtureCarriesMtfExplanation() {
+        val f = listOf("../../contracts/fixtures/pc-push-ready.txt", "../contracts/fixtures/pc-push-ready.txt",
+            "contracts/fixtures/pc-push-ready.txt").map { java.io.File(it) }.first { it.exists() }
+        val a = AlertParser.parse(Signer.verify(code, f.readText())!!, 1791969300000L + 60_000, signatureOk = true)!!
+        assertEquals("UP", a.mtf["H4"])
+        assertEquals("DISCOUNT", a.mtf["Z"])
+        assertEquals("PDL_SWEEP>CHOCH>FVG", a.mtf["M15"])
+        val lines = Mtf.explain(a.mtf, buy = true)
+        assertTrue(lines.any { it.startsWith("✅ H4") })
+        assertTrue(lines.any { it.contains("discount") })
+        assertTrue(lines.any { it.contains("PDL sweep → CHOCH → FVG") })
+        assertEquals("H4 ✅ · H1 ✅ · discount", Mtf.summary(a.mtf, true))
+        // a SELL with the same context is against both higher timeframes
+        assertEquals("H4 ⚠️ · H1 ⚠️ · discount", Mtf.summary(a.mtf, false))
+        assertEquals(a.mtf, Mtf.parse(Mtf.encode(a.mtf)))
+    }
+
+    @Test
+    fun mtfParseIsTolerant() {
+        assertTrue(Mtf.parse(null).isEmpty())
+        assertTrue(Mtf.parse("NA").isEmpty())
+        assertEquals(mapOf("H4" to "UP"), Mtf.parse("H4:UP,broken,:x,Z:"))
+        assertTrue(Mtf.explain(emptyMap(), true).isEmpty())
+    }
+
+    private fun pcAlert(status: String, extra: String = ""): AyeshaAlert {
+        val bar = t0 - 60_000
+        val body = "AYESHA BUY OANDA:EURUSD TF=15 E=1.08120 SL=1.07940 TP=1.08610 RR=2.55 LOT=0.02 EXP=0 SRC=PDL TGT=ASIA_H " +
+            "BAR=$bar ST=$status FROM=PC ID=0123456789abcdef EXPU=${bar + 8 * 900_000L} BLK=NONE $extra V=${StrategyInfo.HASH}"
+        return AlertParser.parse(body, t0, signatureOk = true)!!
+    }
+
+    @Test
+    fun pcWatchIsItsOwnStateNeverAnEntry() {
+        val w = Assess.assess(pcAlert("WATCH", "MTF=H4:UP,M5:PENDING"), t0, okLot, watch)
+        assertEquals(Assess.WATCH, w.state)
+        assertFalse(w.actionable)
+        assertTrue(w.active)
+        assertTrue(w.reasons.single().contains("M5"))
+        assertEquals(Assess.READY, Assess.assess(pcAlert("READY"), t0, okLot, watch).state)
+    }
+
+    @Test
+    fun onlyWatchToReadyOrNoTradeMayReplaceAStoredSignal() {
+        assertTrue(Transitions.allowed("WATCH", "READY"))
+        assertTrue(Transitions.allowed("WATCH", "NO_TRADE"))
+        assertFalse(Transitions.allowed("READY", "WATCH"))   // replayed older message
+        assertFalse(Transitions.allowed("READY", "READY"))   // duplicate
+        assertFalse(Transitions.allowed("NO_TRADE", "READY")) // a block is never lifted
+    }
+
+    @Test
+    fun replayedHeartbeatCannotMakePcLookOnline() {
+        val now = t0
+        val fresh = Heartbeat(now - 60_000, "OK", 6, "h")
+        assertTrue(LinkHealth.accept(fresh, 0L, now))
+        assertEquals(LinkHealth.ONLINE, LinkHealth.status(fresh.pcTimeMs, "OK", now))
+        // ntfy catch-up delivers a 2-hour-old heartbeat "now": rejected, and status stays OFFLINE
+        val old = Heartbeat(now - 2 * 3_600_000L, "OK", 6, "h")
+        assertFalse(LinkHealth.accept(old, fresh.pcTimeMs, now))
+        assertEquals(LinkHealth.OFFLINE, LinkHealth.status(old.pcTimeMs, "OK", now))
+        // even as the very first heartbeat, freshness comes from the PC time, not the arrival time
+        assertTrue(LinkHealth.accept(old, 0L, now))
+        assertEquals(LinkHealth.OFFLINE, LinkHealth.status(old.pcTimeMs, "OK", now))
+        assertFalse(LinkHealth.accept(Heartbeat(now + 3_600_000L, "OK", 6, "h"), 0L, now)) // future clock
+        assertEquals(LinkHealth.STOPPED, LinkHealth.status(now, "STOPPED", now))
+        assertEquals(LinkHealth.DATA_PROBLEM, LinkHealth.status(now, "DATA_STALE", now))
+        assertEquals(LinkHealth.NONE, LinkHealth.status(0L, "", now))
+    }
+
+    @Test
+    fun journalStatsUseOnlyTypedResults() {
+        val ts = listOf(
+            JournalTrade("a", "EURUSD", "PC", 1, 0.40, 0.10),
+            JournalTrade("b", "EURUSD", "PC", 2, -0.10, 0.10),
+            JournalTrade("c", "GBPUSD", "TV", 3, -0.10, null),
+            JournalTrade("d", "USDJPY", "PC", 4, 0.0, 0.10),
+        )
+        val s = Journal.stats(ts)
+        assertEquals(4, s.trades)
+        assertEquals(1, s.wins)
+        assertEquals(2, s.losses)
+        assertEquals(1, s.breakeven)
+        assertEquals(0.20, s.netUsd, 1e-9)
+        assertEquals(1.0 / 3, s.winRate!!, 1e-9)
+        assertEquals(2.0, s.profitFactor!!, 1e-9)
+        assertEquals(0.20, s.maxDrawdownUsd, 1e-9)
+        assertEquals((4.0 - 1.0 + 0.0) / 3, s.avgR!!, 1e-9)
+        assertTrue(s.smallSample)
+        val empty = Journal.stats(emptyList())
+        assertEquals(0, empty.trades)
+        assertNull(empty.winRate)
+        assertEquals(-0.12, Journal.parseUsd(" -0,12 ")!!, 1e-9)
+        assertEquals(0.3, Journal.parseUsd("+0.30")!!, 1e-9)
+        assertNull(Journal.parseUsd("abc"))
+        assertNull(Journal.parseUsd("NaN"))
+    }
 }

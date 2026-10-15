@@ -1,7 +1,7 @@
 # AYESHA canonical strategy contract.
 # Python loads this file at runtime; Pine constants are generated from it (phase 6).
 # Any change here changes strategy_hash, which is shown in every signal.
-strategy_version: "0.2.0"
+strategy_version: "0.3.0"
 
 account:
   broker: Exness
@@ -59,6 +59,18 @@ entry:
   setup_timeframe: M15
   bias_timeframe: H1
   require_htf_bias: false       # countertrend allowed only with stricter score
+
+mtf:   # one combined setup per pair; higher timeframes give context, never their own signals
+  context_timeframe: H4         # major structure; shown in every signal
+  # bias timeframe = entry.bias_timeframe (H1): bias, last BOS/CHoCH, premium/discount of the H1 range
+  # setup timeframe = entry.setup_timeframe (M15): SWEEP -> MSS -> FVG candidate
+  block_against_context: true   # reject when H1 AND H4 both point against the setup
+  confirm_timeframe: null       # M5 = wait for an M5 confirmation candle before READY; null = off
+  confirm_within_bars: 6        # M5 bars allowed after price first touches the entry zone
+  confirm_body_atr: 0.8         # M5 confirmation candle body >= this * ATR(M5)
+  scalp_m1:
+    enabled: false              # NOT validated; the scanner refuses to run with this on
+    validated: false
 
 news:
   block_minutes_before: 30

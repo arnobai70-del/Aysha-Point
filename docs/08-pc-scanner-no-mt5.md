@@ -10,6 +10,16 @@ OANDA demo API (দাম, bid/ask) ─► PC scanner (নিয়ম + সব 
 
 কেউ কোনো অর্ডার দেয় না। ট্রেড আপনি নিজে Exness অ্যাপে নেবেন।
 
+## সবচেয়ে সহজ পথ: install.bat (একবার)
+রেপো ডাউনলোড করে (GitHub → Code → Download ZIP, unzip) `desktop\windows\install.bat`-এ ডাবল-ক্লিক করুন। এটা ধাপে ধাপে:
+১) Python আছে কিনা দেখে, ২) scanner ইনস্টল করে, ৩) OANDA টোকেন চায় (টাইপ করলে স্ক্রিনে দেখা যায় না, শুধু আপনার Windows-এ
+থাকে), ৪) Exness equity চায়, ৫) Exness contract মান চায়, ৬) ফোনের pairing code দেখায়, ৭) `doctor` দিয়ে সব যাচাই করে,
+শেষে জিজ্ঞেস করে Windows চালু হলে scanner নিজে চলবে কিনা (Y/N)। প্রতিদিন চালাতে `start-ayesha.bat`; বন্ধ হয়ে গেলে
+৬০ সেকেন্ড পর নিজে আবার চালু হয়। equity বদলালে install.bat আবার চালান। কোনো সমস্যা হলে `python -m ayesha.cli doctor`
+চালালে OK/FAIL তালিকা দেখাবে।
+
+নিচের ধাপগুলো হাতে করার জন্য (install.bat যা করে, সেটাই)।
+
 ## যা লাগবে (একবারই)
 1. **Python 3.12** (python.org থেকে, ইনস্টলের সময় "Add to PATH" টিক দিন)।
 2. **OANDA fxTrade Practice (ডেমো) অ্যাকাউন্ট** — ফ্রি। শুধু দামের ডেটার জন্য; এতে টাকা লাগে না, ট্রেডও হবে না।
@@ -33,7 +43,7 @@ Exness অ্যাপ → EURUSD → **Specification** খুলুন। ত�
 3. PC-তে: `python -m ayesha.cli push-test` → অ্যাপের হোমে "PC test পাওয়া গেছে" দেখাবে।
 
 ## প্রতিদিন চালানো
-`desktop\windows\run-scanner.bat` খুলুন (ভিতরে `EQUITY=25` আপনার equity দিয়ে বদলান)। এটা চালায়:
+`desktop\windows\start-ayesha.bat` খুলুন (equity install.bat-এ দেওয়া মান থেকে নেয়)। এটা চালায়:
 `python -m ayesha.cli scan --feed oanda --equity 25 --account-type Standard --news-ff --push`
 - Windows **Task Scheduler** → Create Basic Task → "When I log on" → এই .bat ফাইল: PC চালু হলেই scanner চলবে।
 - PC বন্ধ বা ইন্টারনেট না থাকলে কোনো সিগন্যাল যাবে না। অ্যাপের হোমে ১২ মিনিটের বেশি খবর না এলে "PC অফলাইন" দেখাবে,
@@ -43,6 +53,7 @@ Exness অ্যাপ → EURUSD → **Specification** খুলুন। ত�
 | অবস্থা | মানে |
 |---|---|
 | **READY** | PC-র সব gate পাস: নিয়ম, RR ≥ ২, ডেটা তাজা, spread সীমার মধ্যে, নিউজ ফাঁকা, Exness spec মালিক-নিশ্চিত, লট বাজেটের মধ্যে। তবুও Exness অ্যাপে দাম/spread মিলিয়ে নিন। |
+| **WATCH** | সেটআপ বৈধ কিন্তু এখনো entry নয় (যেমন M5 confirmation-এর অপেক্ষা)। নোটিফিকেশন হয় না; READY হলে একবার জানাবে। |
 | **NO TRADE** | সেটআপ ছিল কিন্তু কোনো gate আটকেছে (কারণ লেখা থাকে, যেমন `MIN_LOT_EXCEEDS_RISK`)। নোটিফিকেশন হয় না, আর্কাইভে থাকে। |
 | **UNVERIFIED** | সই ভুল, version আলাদা, দেরিতে আসা, watchlist-এর বাইরে ইত্যাদি। আর্কাইভে থাকে। |
 | **CHART CANDIDATE** | শুধু TradingView চার্টের নিয়ম (যদি আপনার প্ল্যানে চার্ট alert চলে)। নিউজ/spread যাচাই হয়নি। |

@@ -33,6 +33,7 @@ def context(spec: dict) -> dict:
     ctx["sessions"] = sess
     ctx["entry"] = {**spec["entry"], "bias_tv": TV_TF[spec["entry"]["bias_timeframe"]],
                     "setup_tv": TV_TF[spec["entry"]["setup_timeframe"]]}
+    ctx["mtf"] = {**spec.get("mtf", {}), "context_tv": TV_TF[spec.get("mtf", {}).get("context_timeframe") or "H4"]}
     return ctx
 
 

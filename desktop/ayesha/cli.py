@@ -174,6 +174,74 @@ def cmd_backtest(a) -> int:
     return 0
 
 
+def cmd_report(a) -> int:
+    """Validation report over several pairs and MTF modes from exported CSVs (<data-dir>/<PAIR>_<TF>.csv)."""
+    import copy
+
+    from ayesha.backtest.replay import run_backtest
+    from ayesha.backtest.report import build_report, to_markdown
+    from ayesha.news.calendar import NewsCalendar
+
+    spec = load_spec(a.spec)
+    d = Path(a.data_dir)
+    pairs = [x.strip().upper() for x in (a.pairs or ",".join(spec["pairs"]["enabled"])).split(",") if x.strip()]
+    modes = [m.strip() for m in a.modes.split(",") if m.strip()]
+    cal = None
+    if a.news:
+        n = spec["news"]
+        cal = NewsCalendar.from_csv(a.news, before_min=n["block_minutes_before"], after_min=n["block_minutes_after"],
+                                    impacts=tuple(n["impacts_blocked"]))
+    results, missing = {}, []
+    for pair in pairs:
+        point = 0.001 if pip_size_for(pair) == 0.01 else 0.00001
+        for mode in modes:
+            sp = copy.deepcopy(spec)
+            if mode == "m15":
+                sp["mtf"]["confirm_timeframe"] = None
+                f = d / f"{pair}_M15.csv"
+            elif mode == "m5confirm":
+                sp["mtf"]["confirm_timeframe"] = "M5"
+                f = d / f"{pair}_M5.csv"
+            else:
+                print(f"unknown mode {mode} (use m15, m5confirm)")
+                return 2
+            if not f.exists():
+                missing.append(str(f))
+                continue
+            candles = load_candles(f, point)
+            sp["strategy_hash"] = spec["strategy_hash"]
+            results[f"{pair}|{mode}"] = run_backtest(pair, candles, sp, calendar=cal, account_type=a.account_type,
+                                                     usd_rates=APPROX_USD_RATES)
+            print(f"{pair} {mode}: {len(candles)} bars, {len(results[f'{pair}|{mode}']['trades'])} signals")
+    if not results:
+        print("No data files found. Export first, e.g.: ayesha export --feed oanda --symbol EURUSD --tf M15 "
+              f"--days 1095 --out {d / 'EURUSD_M15.csv'}")
+        return 1
+    split = datetime.fromisoformat(a.split).replace(tzinfo=timezone.utc) if a.split else None
+    rep = build_report(results, spec, split_at=split, folds=a.folds, data_label=a.label, usd_rates=APPROX_USD_RATES)
+    rep["missing_files"] = missing
+    if cal is None:
+        rep["notes"].append("No news calendar given: news lockout NOT modelled; live strict mode blocks more setups.")
+    md = to_markdown(rep)
+    if a.out:
+        Path(a.out).write_text(json.dumps(rep, indent=2, default=str), encoding="utf-8")
+    if a.md:
+        Path(a.md).write_text(md, encoding="utf-8")
+    print(md)
+    return 0
+
+
+def cmd_doctor(a) -> int:  # pragma: no cover - network; logic tested via run_doctor
+    from ayesha.doctor import run_doctor
+
+    rows = run_doctor(account_type=a.account_type, oanda_env=a.oanda_env, publish=not a.no_publish)
+    for ok, name, detail in rows:
+        print(f"{'OK  ' if ok else 'FAIL'}  {name}: {detail}")
+    bad = [r for r in rows if not r[0]]
+    print("\nAll checks passed." if not bad else f"\n{len(bad)} check(s) failed. READY alerts stay blocked until fixed.")
+    return 0 if not bad else 1
+
+
 def _db_path(a) -> str:
     p = Path(a.db or Path.home() / "AyeshaFX" / "ayesha.db")
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -332,6 +400,11 @@ def _write_trades(path: str, trades) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    a = build_parser().parse_args(argv)
+    return a.fn(a)
+
+
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ayesha", description="AYESHA FX advisory tools (no order execution)")
     p.add_argument("--spec", default=None, help="path to strategy-spec.yaml")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -386,6 +459,25 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--trades-csv", help="write per-signal CSV (with --out)")
     s.set_defaults(fn=cmd_backtest)
 
+    s = sub.add_parser("report", help="validation report: pairs x modes, in/out-of-sample, walk-forward, $ feasibility")
+    s.add_argument("--data-dir", required=True, help="folder with <PAIR>_M15.csv and/or <PAIR>_M5.csv")
+    s.add_argument("--pairs", help="comma list (default: enabled pairs)")
+    s.add_argument("--modes", default="m15,m5confirm", help="m15 = M15 setup only; m5confirm = wait for M5 confirmation")
+    s.add_argument("--news", help="historical calendar CSV (time_utc,currency,impact,title)")
+    s.add_argument("--split", help="in-sample / out-of-sample split date, e.g. 2025-01-01")
+    s.add_argument("--folds", type=int, default=4)
+    s.add_argument("--label", default="UNLABELLED data", help="data source description shown in the report")
+    s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
+    s.add_argument("--out", help="write JSON")
+    s.add_argument("--md", help="write Markdown")
+    s.set_defaults(fn=cmd_report)
+
+    s = sub.add_parser("doctor", help="check token, OANDA, broker spec, pairing, calendar and phone relay")
+    s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
+    s.add_argument("--oanda-env", default="practice", choices=["practice", "live"])
+    s.add_argument("--no-publish", action="store_true", help="skip the relay publish test")
+    s.set_defaults(fn=cmd_doctor)
+
     s = sub.add_parser("scan", help="live advisory scanner (MT5 terminal or OANDA data, no orders)")
     feed_args(s)
     s.add_argument("--db")
@@ -426,8 +518,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
     s.set_defaults(fn=cmd_confirm_broker)
 
-    a = p.parse_args(argv)
-    return a.fn(a)
+    return p
 
 
 if __name__ == "__main__":

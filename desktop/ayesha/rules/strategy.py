@@ -46,6 +46,8 @@ class Signal:
     score_breakdown: dict[str, int] = field(default_factory=dict)
     liquidity_source: str = ""  # swept level, e.g. PDL
     target_name: str = ""       # target liquidity, e.g. ASIA_H
+    mtf: dict[str, str] = field(default_factory=dict)  # one combined multi-timeframe explanation
+    fvg_zone: tuple[float, float] = (0.0, 0.0)          # (bottom, top) of the entry FVG
 
 
 @dataclass
@@ -101,6 +103,11 @@ class SweepMssFvg:
         self.ltf = Analyzer(self.rules)
         self.htf = Analyzer(self.rules)
         self.agg = Aggregator(self.tf, TF_MINUTES[self.entry_cfg["bias_timeframe"]])
+        mtf = spec.get("mtf", {})
+        self.mtf_cfg = mtf
+        ctx_tf = mtf.get("context_timeframe")
+        self.ctx = Analyzer(self.rules)  # H4 major structure (built from the same closed bars)
+        self.agg_ctx = Aggregator(self.tf, TF_MINUTES[ctx_tf]) if ctx_tf else None
         self.armed: dict[int, Sweep] = {}
         self.day_start: datetime | None = None
         self.day_hi = self.day_lo = None
@@ -119,6 +126,10 @@ class SweepMssFvg:
         h = self.agg.update(c)
         if h is not None:
             self.htf.update(h)
+        if self.agg_ctx is not None:
+            h4 = self.agg_ctx.update(c)
+            if h4 is not None:
+                self.ctx.update(h4)
 
         for sw in ev.sweeps:
             self.armed[sw.direction] = sw
@@ -203,7 +214,11 @@ class SweepMssFvg:
             return reject("NO_TARGET_WITH_MIN_RR")
 
         bias = self.htf.trend
-        sb = self._score(sw, br, fvg, bias * d, rr, spread, close_t)
+        ctx = self.ctx.trend if self.agg_ctx is not None else 0
+        if self.mtf_cfg.get("block_against_context") and bias * d < 0 and ctx * d < 0:
+            return reject("HTF_CONTEXT_AGAINST")  # H1 and H4 both against: no counter-trend raids
+        zone = self._h1_zone(entry)
+        sb = self._score(sw, br, fvg, bias * d, rr, spread, close_t, ctx * d, zone, d)
         score = sum(sb.values())
         grade = "A_PLUS" if score >= self.spec["scoring"]["a_plus"] else "WATCH" if score >= self.spec["scoring"]["watch"] else "IGNORE"
         if self.entry_cfg.get("require_htf_bias") and bias * d <= 0:
@@ -215,19 +230,51 @@ class SweepMssFvg:
             f"OBSERVED: {dname} FVG {fvg.bottom:.5f}-{fvg.top:.5f} created bar {fvg.created_at}, unmitigated",
             f"RULE_BASED_INFERENCE: possible failed {'breakdown' if d == 1 else 'breakout'} (liquidity raid hypothesis)",
             f"TARGET: {target.name} {target.price:.5f}, net RR {rr:.2f} after spread",
-            f"HTF_BIAS: {'aligned' if bias * d > 0 else 'neutral' if bias == 0 else 'against'}",
+            f"HTF_BIAS: H1 {'aligned' if bias * d > 0 else 'neutral' if bias == 0 else 'against'}, "
+            f"H4 {'aligned' if ctx * d > 0 else 'neutral' if ctx == 0 else 'against'}",
+            f"H1_ZONE: {zone[0]}" + (f" ({zone[1]:.2f} of H1 range)" if zone[1] is not None else ""),
             "UNAVAILABLE: actual bank order locations / stop inventory",
         ]
         return Signal(sid, self.symbol, dname, self.SETUP, a.i, close_t, entry, stop, (target.price,), spread, atr,
                       score, grade, a.i + self.entry_cfg["expiry_bars"], self.sessions.active(close_t), bias, trace, sb,
-                      sw.level.name, target.name)
+                      sw.level.name, target.name, self._mtf_text(ctx, bias, zone, sw, br, fvg),
+                      (fvg.bottom, fvg.top))
+
+    def _h1_zone(self, price: float) -> tuple[str, float | None]:
+        """Premium/discount of `price` inside the latest H1 dealing range (last confirmed H1 swing high/low)."""
+        hi, lo = self.htf.last_swing("HIGH", unbroken=False), self.htf.last_swing("LOW", unbroken=False)
+        if hi is None or lo is None or hi.price <= lo.price:
+            return "UNKNOWN", None
+        loc = (price - lo.price) / (hi.price - lo.price)
+        name = "DISCOUNT" if loc < 0.5 else "PREMIUM"
+        if loc < 0 or loc > 1:
+            name = "OUTSIDE_RANGE"
+        return name, loc
+
+    @staticmethod
+    def _trend_word(t: int) -> str:
+        return "UP" if t > 0 else "DOWN" if t < 0 else "RANGE"
+
+    def _mtf_text(self, ctx: int, bias: int, zone: tuple[str, float | None], sw: Sweep, br: StructureBreak,
+                  fvg: FVG) -> dict[str, str]:
+        last = self.htf.breaks[-1] if self.htf.breaks else None
+        return {
+            "H4": self._trend_word(ctx) if self.agg_ctx is not None else "OFF",
+            "H1": self._trend_word(bias),
+            "H1_LAST": f"{last.kind}_{'UP' if last.direction > 0 else 'DOWN'}" if last else "NONE",
+            "H1_ZONE": zone[0],
+            "M15": f"{sw.level.name}_SWEEP>{br.kind}>FVG",
+            "M5": "OFF",  # set by the multi-timeframe engine when M5 confirmation is enabled
+        }
 
     def _score(self, sw: Sweep, br: StructureBreak, fvg: FVG, align: int, rr: float, spread: float,
-               t: datetime) -> dict[str, int]:
+               t: datetime, ctx_align: int = 0, zone: tuple[str, float | None] = ("UNKNOWN", None),
+               d: int = 1) -> dict[str, int]:
         liq = {"PDH": 15, "PDL": 15, "EQH": 15, "EQL": 15, "ASIA_H": 12, "ASIA_L": 12}.get(sw.level.name, 8)
         sess = self.sessions.active(t)
         return {
-            "htf_bias": 15 if align > 0 else 7 if align == 0 else 0,
+            # H1 bias up to 10, H4 context up to 5 (same 15-point budget as before)
+            "htf_bias": (10 if align > 0 else 5 if align == 0 else 0) + (5 if ctx_align > 0 else 2 if ctx_align == 0 else 0),
             "structure": 15 if br.kind == "CHOCH" else 10,
             "liquidity": liq,
             "displacement": 10,

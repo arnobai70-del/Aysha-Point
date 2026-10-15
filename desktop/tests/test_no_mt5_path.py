@@ -215,6 +215,8 @@ FIXTURE_REC = {
     "event_time_utc": "2026-10-14T09:15:00+00:00", "expires_at_utc": "2026-10-14T11:15:00+00:00",
     "status": "READY", "signal_id": "0123456789abcdef", "blockers": [], "strategy_hash": "FIXTUREHASH",
     "setup": "SWEEP_MSS_FVG", "score_points": 88, "news_verification": "CLEAR", "spread_pips": 0.9,
+    "mtf": {"H4": "UP", "H1": "UP", "H1_LAST": "BOS_UP", "H1_ZONE": "DISCOUNT", "M15": "PDL_SWEEP>CHOCH>FVG",
+            "M5": "OFF"},
 }
 
 

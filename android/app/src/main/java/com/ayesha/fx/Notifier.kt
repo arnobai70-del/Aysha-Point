@@ -15,6 +15,7 @@ import com.ayesha.fx.core.Assessment
 import com.ayesha.fx.core.AyeshaAlert
 import com.ayesha.fx.core.LotCalc
 import com.ayesha.fx.core.LotResult
+import com.ayesha.fx.core.Mtf
 import java.util.Locale
 
 object Notifier {
@@ -59,11 +60,22 @@ object Notifier {
         Assess.READY -> "READY (PC যাচাই করেছে)"
         Assess.CHART_CANDIDATE -> "চার্ট ক্যান্ডিডেট"
         Assess.NO_TRADE -> "NO TRADE"
+        Assess.WATCH -> "WATCH (এখনো entry নয়)"
         Assess.EXPIRED -> "মেয়াদ শেষ"
         else -> "UNVERIFIED"
     }
 
-    fun show(context: Context, a: AyeshaAlert) {
+    /** One-line meaning of each state, shown in the app's help card and in notifications. */
+    fun stateMeaning(state: String): String = when (state) {
+        Assess.READY -> "PC সব নিয়ম, নিউজ, spread, লট যাচাই করেছে। Exness-এ দাম মিলিয়ে নিজে সিদ্ধান্ত নিন।"
+        Assess.CHART_CANDIDATE -> "শুধু TradingView চার্টের নিয়ম মিলেছে; নিউজ/spread/Exness যাচাই হয়নি।"
+        Assess.WATCH -> "setup তৈরি হচ্ছে বা A+ নয়; এখন entry নেবেন না।"
+        Assess.NO_TRADE -> "নিয়ম বা ঝুঁকির কারণে এই ট্রেড নেওয়া যাবে না; কারণ লেখা থাকে।"
+        Assess.EXPIRED -> "সময় পেরিয়ে গেছে; আর নেবেন না।"
+        else -> "কোনো তথ্য যাচাই করা যায়নি (সই, version, সময় বা লট); নেবেন না।"
+    }
+
+    fun show(context: Context, a: AyeshaAlert, update: Boolean = false) {
         val prefs = Prefs(context)
         val now = System.currentTimeMillis()
         if (now < prefs.pausedUntilMs && !a.isTest) return
@@ -77,7 +89,8 @@ object Notifier {
         ensureChannel(context)
 
         val icon = if (a.isBuy) "🟢" else "🔴"
-        val title = "$icon ${a.direction} ${a.ticker} · " + stateLabel(verdict.state) + (if (a.isTest) " · TEST" else "")
+        val title = "$icon ${a.direction} ${a.ticker} · " + stateLabel(verdict.state) +
+            (if (update && verdict.state == Assess.READY) " · M5 নিশ্চিত" else "") + (if (a.isTest) " · TEST" else "")
         val lotLine = if (lot.ok) {
             "Lot ${"%.2f".format(Locale.US, lot.lot)} · max loss \$${"%.2f".format(Locale.US, lot.maxLossUsd)}"
         } else {
@@ -85,8 +98,10 @@ object Notifier {
         }
         val check = if (verdict.state == Assess.READY) "Exness অ্যাপে দাম আর spread মিলিয়ে নিন।"
             else "News আর Exness spread যাচাই হয়নি, নিজে দেখে নিন।"
+        val mtf = Mtf.summary(a.mtf, a.isBuy)
         val body = "Entry ${a.fmt(a.entry)} · SL ${a.fmt(a.stop)} · TP ${a.fmt(a.target)} · RR ${"%.2f".format(Locale.US, a.rr)}\n" +
-            "$lotLine\n" + (if (verdict.actionable) check else verdict.reasons.joinToString("; "))
+            "$lotLine\n" + (if (mtf.isNotEmpty()) "MTF: $mtf\n" else "") +
+            (if (verdict.actionable) check else verdict.reasons.joinToString("; ")) + "\n" + stateMeaning(verdict.state)
 
         val open = Intent(context, DetailActivity::class.java)
             .putExtra(DetailActivity.EXTRA_ID, a.id)

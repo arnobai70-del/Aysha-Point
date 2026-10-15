@@ -11,6 +11,7 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import com.ayesha.fx.core.AlertParser
 import com.ayesha.fx.core.Assess
+import com.ayesha.fx.core.LinkHealth
 import com.ayesha.fx.core.SettingsCheck
 import com.ayesha.fx.core.StrategyInfo
 import java.util.Date
@@ -90,16 +91,20 @@ class MainActivity : Activity() {
         if (!prefs.linkEnabled) {
             link.addView(Ui.text(this, "বন্ধ। চালু করতে Settings → PC link (ঐচ্ছিক)।", 14f))
         } else {
-            val hbAge = now - prefs.hbRecvMs
-            val pcText = when {
-                prefs.hbRecvMs == 0L -> "⚠️ PC থেকে এখনো কিছু আসেনি"
-                prefs.hbState == "STOPPED" -> "⏹ PC scanner বন্ধ করা হয়েছে (${ago(prefs.hbRecvMs)})"
-                hbAge > 12 * 60_000L -> "⚠️ PC অফলাইন: শেষ খবর ${ago(prefs.hbRecvMs)}। এই সময়ে PC সিগন্যাল আসবে না।"
-                prefs.hbState == "OK" -> "✅ PC চলছে, ডেটা ঠিক আছে (${ago(prefs.hbRecvMs)})"
-                prefs.hbState == "TEST" -> "✅ PC test পাওয়া গেছে (${ago(prefs.hbRecvMs)})"
-                else -> "⚠️ PC চলছে কিন্তু ডেটা সমস্যা: ${prefs.hbState} (${ago(prefs.hbRecvMs)})"
+            // Judged by the PC's own heartbeat time: a replayed old heartbeat cannot make the PC look online.
+            val pcText = when (LinkHealth.status(prefs.hbPcMs, prefs.hbState, now)) {
+                LinkHealth.NONE -> "⚠️ PC থেকে এখনো কিছু আসেনি"
+                LinkHealth.STOPPED -> "⏹ PC scanner বন্ধ করা হয়েছে (${ago(prefs.hbPcMs)})"
+                LinkHealth.OFFLINE -> "⚠️ PC অফলাইন: শেষ খবর ${ago(prefs.hbPcMs)}। এই সময়ে PC সিগন্যাল আসবে না।"
+                LinkHealth.ONLINE -> "✅ PC চলছে, ডেটা ঠিক আছে (${ago(prefs.hbPcMs)})"
+                LinkHealth.TEST -> "✅ PC test পাওয়া গেছে (${ago(prefs.hbPcMs)})"
+                else -> "⚠️ PC চলছে কিন্তু ডেটা সমস্যা: ${prefs.hbState} (${ago(prefs.hbPcMs)})। এখন READY আসবে না।"
             }
             link.addView(Ui.text(this, pcText, 15f))
+            if (prefs.hbRecvMs > 0 && kotlin.math.abs(prefs.hbRecvMs - prefs.hbPcMs) > 5 * 60_000L &&
+                now - prefs.hbRecvMs < LinkHealth.OFFLINE_AFTER_MS) {
+                link.addView(Ui.text(this, "⚠️ PC আর ফোনের ঘড়িতে ৫ মিনিটের বেশি পার্থক্য। দুটোতেই \"automatic time\" চালু করুন।", 12f, Ui.WATCH))
+            }
             link.addView(Ui.text(this, "ফোনের সংযোগ: ${prefs.linkState} · ${ago(prefs.linkStateMs)}", 12f, Ui.MUTED))
             if (prefs.hbVersion.isNotBlank() && prefs.hbVersion != StrategyInfo.HASH) {
                 link.addView(Ui.text(this, "⚠️ PC আর অ্যাপের strategy version আলাদা (${prefs.hbVersion} ≠ ${StrategyInfo.HASH})। দুটোই আপডেট করুন; ততক্ষণ PC সিগন্যাল UNVERIFIED।", 13f, Ui.WATCH))
@@ -116,7 +121,8 @@ class MainActivity : Activity() {
 
         col.addView(Ui.row(this,
             Ui.button(this, "⚙️ Settings") { startActivity(Intent(this, SettingsActivity::class.java)) },
-            Ui.button(this, "🧪 Test alert", Ui.OFF) {
+            Ui.button(this, "📒 জার্নাল", Ui.SKY) { startActivity(Intent(this, JournalActivity::class.java)) },
+            Ui.button(this, "🧪 Test", Ui.OFF) {
                 val t = System.currentTimeMillis()
                 AlertListener.handle(this, AlertParser.sample(t), t, isTest = true)
                 Toast.makeText(this, "Test alert পাঠানো হয়েছে", Toast.LENGTH_SHORT).show()
@@ -126,8 +132,8 @@ class MainActivity : Activity() {
 
         val entries = AlertStore(this).all()
         val judged = entries.map { it to Notifier.assess(this, it.alert, now) }
-        val active = judged.filter { it.second.actionable }
-        val archive = judged.filter { !it.second.actionable }
+        val active = judged.filter { it.second.active }
+        val archive = judged.filter { !it.second.active }
         col.addView(Ui.row(this,
             Ui.button(this, "সক্রিয় (${active.size})", if (!showArchive) Ui.SKY else Ui.OFF) { showArchive = false; render() },
             Ui.button(this, "আর্কাইভ (${archive.size})", if (showArchive) Ui.SKY else Ui.OFF) { showArchive = true; render() },
@@ -144,6 +150,7 @@ class MainActivity : Activity() {
                 Assess.READY -> Ui.BULL
                 Assess.CHART_CANDIDATE -> if (a.isBuy) Ui.SKY else Ui.BEAR
                 Assess.NO_TRADE -> Ui.BEAR
+                Assess.WATCH -> Ui.WATCH
                 else -> Ui.OFF
             }
             val card = Ui.card(this, accent)
@@ -152,6 +159,8 @@ class MainActivity : Activity() {
                 (if (a.isPc) " · PC" else " · TV") + (if (a.isTest) " · TEST" else ""), 16f, bold = true))
             card.addView(Ui.text(this, "Entry ${a.fmt(a.entry)} · SL ${a.fmt(a.stop)} · TP ${a.fmt(a.target)}", 14f))
             if (!v.actionable) card.addView(Ui.text(this, v.reasons.joinToString("; "), 12f, Ui.WATCH))
+            val mtf = com.ayesha.fx.core.Mtf.summary(a.mtf, a.isBuy)
+            if (mtf.isNotEmpty()) card.addView(Ui.text(this, "MTF: $mtf", 12f, Ui.MUTED))
             val time = DateFormat.format("dd MMM HH:mm", Date(a.signalTimeMs))
             val user = when (e.userStatus) {
                 "TAKEN" -> " · ট্রেড নিয়েছি"
@@ -164,6 +173,14 @@ class MainActivity : Activity() {
             }
             col.addView(card)
         }
+        val help = Ui.card(this, Ui.OFF)
+        help.addView(Ui.text(this, "অবস্থাগুলোর মানে", 13f, Ui.MUTED))
+        for (s in listOf(Assess.READY, Assess.WATCH, Assess.CHART_CANDIDATE, Assess.NO_TRADE, Assess.UNVERIFIED, Assess.EXPIRED)) {
+            help.addView(Ui.text(this, "${Notifier.stateLabel(s)}: ${Notifier.stateMeaning(s)}", 12f))
+        }
+        help.addView(Ui.text(this, "নোটিফিকেশন আসে শুধু READY আর চার্ট ক্যান্ডিডেটের জন্য। WATCH থেকে READY হলে আবার জানাবে।", 12f, Ui.MUTED))
+        col.addView(help)
+
         if (entries.any { it.alert.isTest }) {
             col.addView(Ui.button(this, "Test alert গুলো মুছুন", Ui.OFF) {
                 AlertStore(this).clearTests()

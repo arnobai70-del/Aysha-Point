@@ -17,6 +17,12 @@
 | 2026-10-15 | Spread used by the PC gates = max(feed spread, owner's typical Exness spread) | OANDA spreads can be tighter than Exness's |
 | 2026-10-15 | Phone treats missing BAR / ST / V, other strategy hash, other timeframe, late push, unsigned PC text, pair outside watchlist as UNVERIFIED (archive only) | Re-audit P0-03 / Milestone 2 |
 | 2026-10-15 | TradingView chart and PC scanner are independent calculations; the app never claims they match | Different feeds can disagree (re-audit P0-02) |
+| 2026-10-15 | **One combined MTF setup per pair**: H4 context and H1 bias/zone explain and can block (both against), M15 makes the setup, optional M5 confirms. Higher timeframes never send their own signals | Mission v0.7.0; avoids duplicate alerts |
+| 2026-10-15 | M5 confirmation is **off by default** and changes the entry to a market entry at the confirmation close with a 15-minute expiry; RR is recomputed and must still pass | Untested on real data; the limit-at-FVG entry stays the default |
+| 2026-10-15 | M1 scalp mode is refused by the code until it has separate validation evidence | Master plan Z6 |
+| 2026-10-15 | A hard READY guard in the scanner sits after the risk engine and ignores config switches (e.g. `strict_news: false`) | Mission v0.7.0 phase 1: READY must be impossible with unverified inputs |
+| 2026-10-15 | Phone journal statistics use only results the owner typed for trades they took; signals, tests and backtests never enter them | Master plan Z6/Z9: real vs simulated separation |
+| 2026-10-15 | Multi-year backtests run in a manual GitHub Actions workflow with the owner's OANDA token as a repository secret; data is never committed | Container cannot reach OANDA; secret stays in GitHub |
 
 ## Delivery modes
 - **Mode B, PC scanner (canonical, free):** OANDA data → rules + all gates → signed ntfy push → AYESHA app inbox.

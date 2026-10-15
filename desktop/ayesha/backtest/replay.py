@@ -21,7 +21,8 @@ from ayesha.models import AccountState, Candle
 from ayesha.feed.static_specs import assumed_fx_spec
 from ayesha.news.calendar import NewsCalendar
 from ayesha.risk.engine import RiskConfig, TradeProposal, evaluate
-from ayesha.rules.strategy import TF_MINUTES, Signal, SweepMssFvg
+from ayesha.rules.mtf import MtfEngine
+from ayesha.rules.strategy import TF_MINUTES, Signal
 
 NY = ZoneInfo("America/New_York")
 FLAT_TIME = time(16, 45)
@@ -30,7 +31,7 @@ FLAT_TIME = time(16, 45)
 @dataclass
 class Trade:
     signal: Signal
-    status: str = "PENDING"  # PENDING | OPEN | CLOSED | MISSED | EXPIRED | BLOCKED
+    status: str = "PENDING"  # PENDING | PENDING_MARKET | OPEN | CLOSED | MISSED | EXPIRED | BLOCKED | UNCONFIRMED
     fill_index: int | None = None
     fill_price: float | None = None
     exit_index: int | None = None
@@ -48,51 +49,101 @@ def _after_flat_time(t: datetime) -> bool:
 def run_backtest(symbol: str, candles: list[Candle], spec: dict[str, Any], *,
                  calendar: NewsCalendar | None = None, equity_usd: float | None = None,
                  account_type: str = "Standard", usd_rates: dict[str, float] | None = None) -> dict[str, Any]:
-    strat = SweepMssFvg(symbol, spec)
+    """`candles` are closed bars of the engine's base timeframe: M15, or M5 when M5 confirmation is on."""
+    eng = MtfEngine(symbol, spec)
     cfg = RiskConfig.from_spec(spec)
     if calendar is None:
         # No calendar => news is NOT modelled. Report says so; strict gate is relaxed for research only.
         cfg = RiskConfig(**{**cfg.__dict__, "strict_news": False})
-    pip = strat.pip
+    pip = eng.strat.pip
     slip = cfg.slippage_buffer_pips * pip
-    tf = timedelta(minutes=TF_MINUTES[spec["entry"]["setup_timeframe"]])
+    tf = timedelta(minutes=TF_MINUTES[eng.base_tf])
     trades: list[Trade] = []
+    awaiting: dict[str, Trade] = {}
     capital_checks: list[list[str]] = []
+
+    def gate(sig: Signal, c: Candle) -> tuple[list[str], list[str] | None]:
+        news = "CLEAR"
+        if calendar is not None:
+            news, _ = calendar.status(symbol, sig.bar_close_utc)
+            if news == "CLEAR" and sig.score_breakdown.get("news_integrity", 0) == 0:
+                sig.score_breakdown["news_integrity"] = 5
+                sig.score += 5
+        prop = TradeProposal(symbol, sig.direction, sig.entry, sig.stop, sig.targets, sig.spread, sig.atr,
+                             0.0, True, news)
+        inst = assumed_fx_spec(symbol, c.close, account_type, usd_rates)
+        # sizing-independent gates (news, spread, stop tightness, RR) at a notional large equity
+        blockers = evaluate(prop, inst, AccountState(equity_usd=1e6), cfg, live=False).blockers
+        cap = evaluate(prop, inst, AccountState(equity_usd=equity_usd), cfg, live=False).blockers \
+            if equity_usd is not None else None
+        return blockers, cap
 
     for i, c in enumerate(candles):
         # 1) manage existing orders on this bar (created on earlier bars only)
         for t in trades:
             if t.status == "PENDING":
                 _pending(t, c, i, slip)
+            elif t.status == "PENDING_MARKET":
+                _market(t, c, i, slip)
             elif t.status == "OPEN":
                 _open(t, c, i, slip, tf)
-        # 2) strategy sees the closed bar and may propose new orders
-        for sig in strat.on_bar(c):
-            news = "CLEAR"
-            if calendar is not None:
-                news, _ = calendar.status(symbol, sig.bar_close_utc)
-                if news == "CLEAR":
-                    sig.score_breakdown["news_integrity"] = 5
-                    sig.score += 5
-            prop = TradeProposal(symbol, sig.direction, sig.entry, sig.stop, sig.targets, sig.spread, sig.atr,
-                                 0.0, True, news)
-            inst = assumed_fx_spec(symbol, c.close, account_type, usd_rates)
-            # sizing-independent gates (news, spread, stop tightness, RR) at a notional large equity
-            d = evaluate(prop, inst, AccountState(equity_usd=1e6), cfg, live=False)
-            tr = Trade(sig, planned_loss=abs(sig.entry - sig.stop) + sig.spread + slip)
-            if d.blockers:
-                tr.status, tr.blockers = "BLOCKED", d.blockers
-            trades.append(tr)
-            if equity_usd is not None:
-                capital_checks.append(evaluate(prop, inst, AccountState(equity_usd=equity_usd), cfg, live=False).blockers)
+        # 2) the engine sees the closed bar and may propose, confirm or drop setups
+        for ev in eng.on_bar(c):
+            sig = ev.signal
+            if ev.kind == "SETUP":
+                blockers, cap = gate(sig, c)
+                tr = Trade(sig, planned_loss=abs(sig.entry - sig.stop) + sig.spread + slip)
+                if blockers:
+                    tr.status, tr.blockers = "BLOCKED", blockers
+                elif ev.needs_confirmation:
+                    tr.status = "AWAITING_CONFIRMATION"
+                    awaiting[sig.signal_id] = tr
+                trades.append(tr)
+                if cap is not None and not ev.needs_confirmation:
+                    capital_checks.append(cap)
+            elif ev.kind == "CONFIRM_FAILED":
+                tr = awaiting.pop(sig.signal_id, None)
+                if tr is not None:
+                    tr.status, tr.exit_reason = "UNCONFIRMED", ev.reason
+            elif ev.kind == "CONFIRMED":
+                tr = awaiting.pop(sig.signal_id, None)
+                if tr is None:
+                    continue
+                blockers, cap = gate(sig, c)  # re-check gates at the refined entry
+                tr.signal = sig
+                tr.planned_loss = abs(sig.entry - sig.stop) + sig.spread + slip
+                if cap is not None:
+                    capital_checks.append(cap)
+                if blockers:
+                    tr.status, tr.blockers = "BLOCKED", blockers
+                else:
+                    tr.status = "PENDING_MARKET"  # market order fills at the NEXT bar's open
 
     for t in trades:
-        if t.status in ("PENDING", "OPEN"):
+        if t.status in ("PENDING", "OPEN", "PENDING_MARKET", "AWAITING_CONFIRMATION"):
             t.status, t.exit_reason = "UNRESOLVED_END_OF_DATA", "END"
-    return {"symbol": symbol, "trades": trades, "rejections": strat.rejections,
+    return {"symbol": symbol, "trades": trades, "rejections": eng.rejections,
             "capital_checks": capital_checks, "news_modelled": calendar is not None,
+            "base_timeframe": eng.base_tf, "confirm_timeframe": eng.confirm_tf,
             "bars": len(candles), "start": candles[0].time if candles else None,
             "end": candles[-1].time if candles else None}
+
+
+def _market(t: Trade, c: Candle, i: int, slip: float) -> None:
+    """Confirmed entry: fill at this bar's open (BUY pays the spread), then a same-bar stop can hit."""
+    s = t.signal
+    if _after_flat_time(c.time):
+        t.status = "EXPIRED"
+        return
+    t.status, t.fill_index, t.fill_time = "OPEN", i, c.time
+    if s.direction == "BUY":
+        t.fill_price = c.open + c.spread
+        if c.low <= s.stop:
+            _close(t, i, "SL", min(c.open, s.stop) - slip)
+    else:
+        t.fill_price = c.open
+        if c.high >= s.stop:
+            _close(t, i, "SL", max(c.open, s.stop) + c.spread + slip)
 
 
 def _pending(t: Trade, c: Candle, i: int, slip: float) -> None:

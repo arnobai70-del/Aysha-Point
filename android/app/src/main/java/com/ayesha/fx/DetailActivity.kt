@@ -6,11 +6,15 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.text.InputType
 import android.text.format.DateFormat
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.ayesha.fx.core.Assess
+import com.ayesha.fx.core.Journal
 import com.ayesha.fx.core.LotCalc
+import com.ayesha.fx.core.Mtf
 import com.ayesha.fx.core.StrategyInfo
 import java.util.Date
 import java.util.Locale
@@ -118,6 +122,15 @@ class DetailActivity : Activity() {
         risk.addView(Ui.text(this, "Exness অ্যাপে আসল spread আর lot মিলিয়ে নিন। বড় নিউজের ৩০ মিনিট আগে-পরে ট্রেড নেবেন না।", 12f, Ui.MUTED))
         col.addView(risk)
 
+        val mtfLines = Mtf.explain(a.mtf, a.isBuy)
+        if (mtfLines.isNotEmpty()) {
+            val m = Ui.card(this, Ui.SKY)
+            m.addView(Ui.text(this, "Multi-timeframe (একটাই setup, প্রতিটা timeframe আলাদা সিগন্যাল নয়)", 13f, Ui.MUTED))
+            for (l in mtfLines) m.addView(Ui.text(this, l, 14f))
+            m.addView(Ui.text(this, "✅ = ট্রেডের দিকে, ⚠️ = উল্টো দিকে, ➖ = নিরপেক্ষ/অজানা। এগুলো চার্টের মডেল, নিশ্চয়তা নয়।", 12f, Ui.MUTED))
+            col.addView(m)
+        }
+
         val why = Ui.card(this, Ui.OFF)
         why.addView(Ui.text(this, "কেন এই সিগন্যাল", 13f, Ui.MUTED))
         why.addView(Ui.text(this, "① ${a.source} liquidity sweep হয়েছে\n② উল্টো দিকে MSS (displacement সহ)\n③ FVG-তে entry zone\n④ Target: ${a.targetName}", 15f))
@@ -134,9 +147,32 @@ class DetailActivity : Activity() {
             Toast.makeText(this, "কপি হয়েছে", Toast.LENGTH_SHORT).show()
         })
         col.addView(Ui.row(this,
-            Ui.button(this, "✅ ট্রেড নিয়েছি", Ui.BULL) { AlertStore(this).mark(a.id, "TAKEN"); render() },
+            Ui.button(this, "✅ ট্রেড নিয়েছি", Ui.BULL) {
+                AlertStore(this).mark(a.id, "TAKEN", riskUsd = if (r.ok) r.maxLossUsd else null); render()
+            },
             Ui.button(this, "✖ বাদ", Ui.OFF) { AlertStore(this).mark(a.id, "SKIPPED"); render() },
         ))
+        if (e.userStatus == "TAKEN" && !a.isTest) {
+            val j = Ui.card(this, Ui.SKY)
+            j.addView(Ui.text(this, "জার্নাল: Exness-এ ট্রেড বন্ধ হলে আসল ফলাফল লিখুন (USD, লস হলে মাইনাস, যেমন -0.12)", 13f, Ui.MUTED))
+            if (e.resultUsd != null) j.addView(Ui.text(this, "লেখা আছে: \$${f2(e.resultUsd!!)}", 15f, bold = true))
+            val input = EditText(this)
+            input.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
+            input.setTextColor(Ui.TEXT)
+            input.hint = "যেমন 0.35 বা -0.12"
+            j.addView(input)
+            j.addView(Ui.button(this, "ফলাফল সেভ করুন", Ui.SKY) {
+                val v2 = Journal.parseUsd(input.text.toString())
+                if (v2 == null) {
+                    Toast.makeText(this, "সংখ্যা লিখুন, যেমন -0.12", Toast.LENGTH_SHORT).show()
+                } else {
+                    AlertStore(this).mark(a.id, "TAKEN", resultUsd = v2)
+                    Toast.makeText(this, "জার্নালে সেভ হয়েছে", Toast.LENGTH_SHORT).show()
+                    render()
+                }
+            })
+            col.addView(j)
+        }
         col.addView(Ui.text(this, "এই অ্যাপ কখনো অর্ডার দেয় না। সিদ্ধান্ত আপনার।", 12f, Ui.MUTED))
     }
 

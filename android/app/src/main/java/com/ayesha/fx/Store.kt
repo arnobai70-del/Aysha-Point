@@ -2,7 +2,10 @@ package com.ayesha.fx
 
 import android.content.Context
 import com.ayesha.fx.core.AyeshaAlert
+import com.ayesha.fx.core.JournalTrade
+import com.ayesha.fx.core.Mtf
 import com.ayesha.fx.core.StrategyInfo
+import com.ayesha.fx.core.Transitions
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -84,8 +87,14 @@ class Prefs(context: Context) {
     }
 }
 
-/** A stored alert plus what the owner did with it. */
-data class Entry(val alert: AyeshaAlert, var userStatus: String = "NEW", var resultUsd: Double? = null)
+/** A stored alert plus what the owner did with it. resultUsd/riskUsd/closedAtMs are the owner's REAL trade. */
+data class Entry(
+    val alert: AyeshaAlert,
+    var userStatus: String = "NEW",
+    var resultUsd: Double? = null,
+    var riskUsd: Double? = null,
+    var closedAtMs: Long? = null,
+)
 
 /**
  * Inbox stored as a small JSON file (last 300 alerts). History is never rewritten except user marks.
@@ -115,22 +124,47 @@ class AlertStore(context: Context) {
     fun get(id: String): Entry? = all().firstOrNull { it.alert.id == id }
 
     /** Returns false if this alert id is already stored (so it is never notified twice). */
-    fun add(a: AyeshaAlert): Boolean = synchronized(LOCK) {
+    fun add(a: AyeshaAlert): Boolean = upsert(a) == Upsert.NEW
+
+    enum class Upsert { NEW, UPDATED, DUPLICATE }
+
+    /**
+     * NEW: first time this id is seen. UPDATED: a signed PC status change for the same id (WATCH -> READY
+     * after M5 confirmation, or WATCH -> NO_TRADE); the owner's own marks are kept. DUPLICATE: a replay.
+     */
+    fun upsert(a: AyeshaAlert): Upsert = synchronized(LOCK) {
         val list = readLocked().toMutableList()
-        if (list.any { it.alert.id == a.id }) return false
-        list.add(0, Entry(a))
-        save(list.take(300))
-        true
+        val i = list.indexOfFirst { it.alert.id == a.id }
+        if (i < 0) {
+            list.add(0, Entry(a))
+            save(list.take(300))
+            return Upsert.NEW
+        }
+        val old = list[i]
+        if (!(a.isPc && a.signatureOk && old.alert.isPc && Transitions.allowed(old.alert.status, a.status))) {
+            return Upsert.DUPLICATE
+        }
+        list[i] = old.copy(alert = a)
+        save(list)
+        Upsert.UPDATED
     }
 
-    fun mark(id: String, status: String, resultUsd: Double? = null) = synchronized(LOCK) {
+    fun mark(id: String, status: String, resultUsd: Double? = null, riskUsd: Double? = null) = synchronized(LOCK) {
         val list = readLocked()
         list.firstOrNull { it.alert.id == id }?.let {
             it.userStatus = status
-            if (resultUsd != null) it.resultUsd = resultUsd
+            if (riskUsd != null && it.riskUsd == null) it.riskUsd = riskUsd
+            if (resultUsd != null) {
+                it.resultUsd = resultUsd
+                it.closedAtMs = System.currentTimeMillis()
+            }
         }
         save(list)
     }
+
+    /** The owner's real, closed trades (never tests, never signals without a typed result). */
+    fun journal(): List<JournalTrade> = all().filter { !it.alert.isTest && it.userStatus == "TAKEN" && it.resultUsd != null }
+        .map { JournalTrade(it.alert.id, it.alert.ticker, it.alert.origin, it.closedAtMs ?: it.alert.receivedAtMs, it.resultUsd!!, it.riskUsd) }
 
     fun clearTests() = synchronized(LOCK) { save(readLocked().filter { !it.alert.isTest }) }
 
@@ -153,8 +187,9 @@ class AlertStore(context: Context) {
             .put("barCloseMs", a.barCloseMs ?: JSONObject.NULL).put("quoteUsd", a.quoteUsd ?: JSONObject.NULL)
             .put("status", a.status).put("origin", a.origin).put("signalId", a.signalId)
             .put("expiresUtcMs", a.expiresUtcMs ?: JSONObject.NULL).put("blockers", JSONArray(a.blockers))
-            .put("signatureOk", a.signatureOk)
+            .put("signatureOk", a.signatureOk).put("mtf", Mtf.encode(a.mtf))
             .put("userStatus", e.userStatus).put("resultUsd", e.resultUsd ?: JSONObject.NULL)
+            .put("riskUsd", e.riskUsd ?: JSONObject.NULL).put("closedAtMs", e.closedAtMs ?: JSONObject.NULL)
     }
 
     private fun fromJson(o: JSONObject): Entry? = try {
@@ -175,9 +210,12 @@ class AlertStore(context: Context) {
                 expiresUtcMs = if (o.isNull("expiresUtcMs") || !o.has("expiresUtcMs")) null else o.optLong("expiresUtcMs"),
                 blockers = o.optJSONArray("blockers")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } } ?: emptyList(),
                 signatureOk = o.optBoolean("signatureOk", false),
+                mtf = Mtf.parse(o.optString("mtf", "")),
             ),
             userStatus = o.optString("userStatus", "NEW"),
-            resultUsd = if (o.isNull("resultUsd")) null else o.optDouble("resultUsd"),
+            resultUsd = if (o.isNull("resultUsd")) null else o.optDouble("resultUsd").takeIf { it.isFinite() },
+            riskUsd = if (!o.has("riskUsd") || o.isNull("riskUsd")) null else o.optDouble("riskUsd").takeIf { it.isFinite() },
+            closedAtMs = if (!o.has("closedAtMs") || o.isNull("closedAtMs")) null else o.optLong("closedAtMs"),
         )
     } catch (e: Exception) {
         null

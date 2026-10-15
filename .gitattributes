@@ -1,1 +1,2 @@
 contracts/fixtures/* text eol=lf
+*.bat text eol=crlf

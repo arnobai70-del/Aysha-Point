@@ -180,3 +180,192 @@ def test_alert_text_has_no_account_data():
     txt = format_alert(rec)
     assert "A+ SETUP" in txt and "not a probability" in txt
     assert "equity" not in txt.lower() and "balance" not in txt.lower()
+
+
+# --- v0.7.0: hard READY guard, delivery retry, M5 confirmation upgrade ------------------------
+
+def test_ready_guard_holds_even_with_strict_news_off(scan_spec, tmp_path):
+    """Config can be loosened by mistake; READY must still be impossible without a CLEAR news check."""
+    import json
+    s = copy.deepcopy(scan_spec)
+    s["risk"]["strict_news"] = False
+    candles = synthetic(4000)
+    reg = Registry(tmp_path / "g.db")
+    rec = Recorder()
+    t = [candles[400].time + timedelta(seconds=5)]
+    sc = Scanner(FakeFeed(candles, 100_000, lambda: t[0]), s, reg, [rec], None, clock=lambda: t[0])
+    sc.clock_t = t
+    sc.warmup()
+    _drive(sc, candles, 401)
+    payloads = [json.loads(r["payload"]) for r in reg.db.execute("SELECT payload FROM signals")]
+    assert payloads and rec.sent == []
+    assert all(p["status"] != "READY" for p in payloads)
+    assert any("READY_GUARD:NEWS_NOT_VERIFIED_CLEAR" in p["blockers"] for p in payloads)
+
+
+class AssumedSpecFeed(FakeFeed):
+    def instrument(self, symbol):
+        return assumed_fx_spec(symbol, 1.08)  # ASSUMED_EXNESS_* source: not verified
+
+
+def test_ready_guard_blocks_unverified_contract(scan_spec, tmp_path):
+    import json
+    candles = synthetic(4000)
+    reg = Registry(tmp_path / "h.db")
+    rec = Recorder()
+    t = [candles[400].time + timedelta(seconds=5)]
+    sc = Scanner(AssumedSpecFeed(candles, 100_000, lambda: t[0]), scan_spec, reg, [rec], _calendar(candles),
+                 clock=lambda: t[0])
+    sc.clock_t = t
+    sc.warmup()
+    _drive(sc, candles, 401)
+    payloads = [json.loads(r["payload"]) for r in reg.db.execute("SELECT payload FROM signals")]
+    assert payloads and rec.sent == []
+    assert all(p["status"] != "READY" for p in payloads)
+
+
+class Flaky(Recorder):
+    """Fails the first `fail` sends (network down), then works."""
+    channel = "ntfy"
+    archive_non_ready = False
+
+    def __init__(self, fail):
+        super().__init__()
+        self.fail = fail
+        self.attempts = 0
+
+    def send(self, rec):
+        self.attempts += 1
+        if self.attempts <= self.fail:
+            return False, "URLError"
+        return super().send(rec)
+
+
+def test_failed_ready_push_is_retried_once_delivered(scan_spec, tmp_path):
+    candles = synthetic(6000)
+    reg = Registry(tmp_path / "i.db")
+    fl = Flaky(fail=2)
+    sc = _make(scan_spec, candles, reg, 100_000, fl)
+    _drive(sc, candles, 401)
+    assert fl.sent, "the READY alert must arrive after the network comes back"
+    assert len(fl.sent) == len(set(fl.sent)), "never delivered twice"
+    first = fl.sent[0]
+    assert reg.was_delivered(first, "ntfy", "READY")
+    hist = [e["to_status"] for e in reg.events(first)]
+    assert hist.count("NOTIFIED") == 1
+
+
+class M5Feed(FakeFeed):
+    def _last(self):
+        i = bisect.bisect_right(self.times, self.clock() - timedelta(minutes=5)) - 1
+        return self.c[i]
+
+
+class Archive(Recorder):
+    channel = "ntfy"
+    archive_non_ready = True
+
+    def send(self, rec):
+        self.sent.append((rec["signal_id"], rec["status"], rec.get("entry_type")))
+        return True, "ok"
+
+
+def test_m5_confirmation_upgrades_watch_to_ready_without_duplicates(scan_spec, tmp_path):
+    import json
+    s = copy.deepcopy(scan_spec)
+    s["mtf"]["confirm_timeframe"] = "M5"
+    candles = synthetic(24000, minutes=5, vol=0.00035, seed=5)
+    reg = Registry(tmp_path / "m5.db")
+    ar = Archive()
+    t = [candles[1200].time + timedelta(seconds=5)]
+    sc = Scanner(M5Feed(candles, 100_000, lambda: t[0]), s, reg, [ar], _calendar(candles), clock=lambda: t[0])
+    assert sc.tf_name == "M5" and sc.setup_tf_name == "M15"
+    sc.warmup()
+    for c in candles[1201:]:
+        t[0] = c.time + timedelta(minutes=5, seconds=5)
+        sc.poll()
+    rows = [json.loads(r["payload"]) | {"_st": r["status"]} for r in reg.db.execute("SELECT payload, status FROM signals")]
+    assert rows
+    by_id: dict[str, list] = {}
+    for sid, st, et in ar.sent:
+        by_id.setdefault(sid, []).append((st, et))
+    # a READY push only ever follows a WATCH_M5 push of the same id, and comes at most once
+    readies = [sid for sid, st, _ in ar.sent if st == "READY"]
+    assert len(readies) == len(set(readies))
+    for sid in readies:
+        seq = [x[0] for x in by_id[sid]]
+        assert seq.index("WATCH_M5") < seq.index("READY")
+        assert ("READY", "MARKET_AFTER_M5_CONFIRMATION") in by_id[sid]
+        hist = [e["to_status"] for e in reg.events(sid)]
+        assert hist[0] == "WATCH_M5" and "READY" in hist
+    # nothing became READY at setup time while confirmation is required
+    for sid, seq in by_id.items():
+        assert seq[0][0] != "READY"
+    watch_m5 = [r for r in rows if any(e["to_status"] == "WATCH_M5" for e in reg.events(r["signal_id"]))]
+    assert watch_m5, "expected setups waiting for M5 confirmation"
+    assert {r["_st"] for r in watch_m5} - {"WATCH_M5"}, "some setups must resolve (confirmed or failed)"
+
+
+def test_confirmed_event_upgrades_record_and_pushes_ready_once(scan_spec, tmp_path):
+    """Deterministic path: SETUP (needs M5) -> WATCH_M5 archive push; CONFIRMED -> READY push; repeat -> nothing."""
+    from ayesha.rules.mtf import Event
+    from ayesha.rules.strategy import Signal
+
+    s = copy.deepcopy(scan_spec)
+    s["mtf"]["confirm_timeframe"] = "M5"
+    candles = synthetic(2000, minutes=5, vol=0.00035, seed=5)
+    reg = Registry(tmp_path / "u.db")
+    ar = Archive()
+    t = [candles[1500].time + timedelta(minutes=5, seconds=5)]
+    sc = Scanner(M5Feed(candles, 100_000, lambda: t[0]), s, reg, [ar], _calendar(candles), clock=lambda: t[0])
+    sc.warmup()
+    bar = candles[1500]
+    p = bar.close
+    sig = Signal("feedc0de00000001", "EURUSD", "BUY", "SWEEP_MSS_FVG", 0, bar.time + timedelta(minutes=5),
+                 p - 0.0003, p - 0.0023, (p + 0.0060,), 0.00008, 0.0010, 90, "A_PLUS", 8, ["LONDON"], 1,
+                 mtf={"H4": "UP", "H1": "UP", "H1_ZONE": "DISCOUNT", "M15": "PDL_SWEEP>CHOCH>FVG", "M5": "PENDING"},
+                 score_breakdown={"x": 85})
+    rec = sc._event(Event("SETUP", sig, needs_confirmation=True), bar)
+    assert rec["status"] == "WATCH_M5" and reg.get(sig.signal_id)["status"] == "WATCH_M5"
+    assert ar.sent == [(sig.signal_id, "WATCH_M5", "LIMIT_AT_FVG")]
+    conf = replace(sig, entry=p, mtf=dict(sig.mtf, M5="CONFIRMED_UP"))
+    out = sc._event(Event("CONFIRMED", conf), bar)
+    assert out["status"] == "READY", out["blockers"]
+    if out["status"] == "READY":
+        assert ar.sent[-1] == (sig.signal_id, "READY", "MARKET_AFTER_M5_CONFIRMATION")
+        assert reg.get(sig.signal_id)["status"] == "NOTIFIED"
+        exp = datetime.fromisoformat(out["expires_at_utc"])
+        assert exp <= conf.bar_close_utc + timedelta(minutes=15)
+    else:
+        assert any(b.startswith("READY_GUARD") or b for b in out["blockers"])
+    n = len(ar.sent)
+    assert sc._event(Event("CONFIRMED", conf), bar) is None  # not WATCH_M5 any more
+    sc.retry_deliveries()
+    assert len(ar.sent) == n, "already delivered READY is never re-sent"
+    hist = [e["to_status"] for e in reg.events(sig.signal_id)]
+    assert hist[0] == "WATCH_M5"
+
+
+def test_confirm_failed_is_archived_not_alerted(scan_spec, tmp_path):
+    from ayesha.rules.mtf import Event
+    from ayesha.rules.strategy import Signal
+
+    s = copy.deepcopy(scan_spec)
+    s["mtf"]["confirm_timeframe"] = "M5"
+    candles = synthetic(2000, minutes=5, vol=0.00035, seed=5)
+    reg = Registry(tmp_path / "f.db")
+    ar = Archive()
+    t = [candles[1500].time + timedelta(minutes=5, seconds=5)]
+    sc = Scanner(M5Feed(candles, 100_000, lambda: t[0]), s, reg, [ar], _calendar(candles), clock=lambda: t[0])
+    sc.warmup()
+    bar = candles[1500]
+    p = bar.close
+    sig = Signal("feedc0de00000002", "EURUSD", "SELL", "SWEEP_MSS_FVG", 0, bar.time + timedelta(minutes=5),
+                 p + 0.0003, p + 0.0023, (p - 0.0060,), 0.00008, 0.0010, 90, "A_PLUS", 8, ["LONDON"], -1,
+                 score_breakdown={"x": 85})
+    sc._event(Event("SETUP", sig, needs_confirmation=True), bar)
+    out = sc._event(Event("CONFIRM_FAILED", sig, "NO_M5_CONFIRMATION"), bar)
+    assert out["status"] == "CONFIRM_FAILED" and "NO_M5_CONFIRMATION" in out["blockers"]
+    assert [x[1] for x in ar.sent] == ["WATCH_M5", "CONFIRM_FAILED"]
+    from ayesha.delivery.push import format_push
+    assert " ST=NO_TRADE " in format_push(out)

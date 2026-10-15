@@ -33,8 +33,10 @@ class AlertListener : NotificationListenerService() {
                 Prefs(context).reject("পড়া যায়নি বা লেভেল ভুল: " + text.lineSequence().firstOrNull().orEmpty().take(60))
                 return
             }
-            if (AlertStore(context).add(alert)) {
-                Notifier.show(context, alert)
+            when (AlertStore(context).upsert(alert)) {
+                AlertStore.Upsert.NEW -> Notifier.show(context, alert)
+                AlertStore.Upsert.UPDATED -> Notifier.show(context, alert, update = true)
+                AlertStore.Upsert.DUPLICATE -> {}
             }
         }
 

@@ -12,6 +12,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import com.ayesha.fx.core.Heartbeat
+import com.ayesha.fx.core.LinkHealth
 import com.ayesha.fx.core.Signer
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -52,6 +53,8 @@ class LinkService : Service() {
             }
             val hb = Heartbeat.parse(body)
             if (hb != null) {
+                // Catch-up replays old heartbeats; only a newer one may refresh the PC status.
+                if (!LinkHealth.accept(hb, prefs.hbPcMs, receivedAtMs)) return
                 prefs.hbPcMs = hb.pcTimeMs
                 prefs.hbRecvMs = receivedAtMs
                 prefs.hbState = hb.state

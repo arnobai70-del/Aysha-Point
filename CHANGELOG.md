@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0 — 2026-10-15 (integration, multi-timeframe, validation)
+- Multi-timeframe engine (strategy 0.3.0): one combined setup per pair. H4 context (blocks when H1 and H4 both oppose), H1 bias + last BOS/CHoCH + premium/discount zone, M15 SWEEP→MSS→FVG setup, optional M5 confirmation (`mtf.confirm_timeframe: M5`, off by default: entry becomes the confirmation close, RR recomputed, 15-minute expiry). M1 scalp is refused until validated. Every signal carries an `mtf` explanation.
+- Scanner: hard READY guard independent of config (news CLEAR, verified spec, fresh quote and data, lot > 0, no blockers ⇒ else NO_TRADE `READY_GUARD:<reason>`); failed READY pushes retried until expiry, never twice (per-status delivery keys); WATCH_M5 → READY / CONFIRM_FAILED updates of the same signal id; WATCH_M5 expiry.
+- Push wire format 3: `MTF=` key; PC statuses mapped to READY / WATCH / NO_TRADE; "why" line says when it waits for M5 or is a short-lived market entry.
+- Windows: `install.bat` (Python check, install, hidden token prompt → user environment, equity, Exness contract, pairing, health check, optional Startup entry) and `start-ayesha.bat` (auto-restart). `ayesha doctor` checks token, OANDA prices, Exness contract, pairing code, news calendar and the relay.
+- Validation report `ayesha report`: pairs × modes (M15 only, M5-confirmed), wins/losses, avg win/loss R, planned net RR, expectancy after costs, PF, max DD, in-sample vs out-of-sample, walk-forward folds (frozen rules), by session / direction / H4 context, $20/$25/$30 Exness Standard feasibility at 0.5% and 1%. Manual `backtest` workflow builds it from multi-year OANDA data with the owner's token secret; no real result exists yet.
+- Android 0.4.0: WATCH state, MTF explanation card and notification summary, status meanings on the home screen, signed WATCH→READY upgrades notify once (replays never downgrade), heartbeat replay protection (PC freshness from the PC's own time, clock-skew warning), journal screen with real-trade results and statistics (separate from signals and tests).
+- Pine: H4 context row, feed note (TradingView feed vs PC/OANDA vs Exness), H1 BIAS label.
+- CI: doctor-without-credentials step, Windows start-script step, live Forex Factory fetch job.
+
 ## 0.6.0 — 2026-10-15 (re-audit v2: free, MT5-free signal path)
 - PC scanner runs without MT5: `--feed oanda` (OANDA v20 practice API, bid/ask candles, quote age). `export --feed oanda` gives real history for backtests.
 - Exness spec without MT5: repo assumption until the owner confirms it from the Exness app (`ayesha confirm-broker`); READY is impossible before that.

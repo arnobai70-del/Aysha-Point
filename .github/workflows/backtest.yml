@@ -1,0 +1,58 @@
+name: backtest
+# Manual, on demand: multi-year validation report from OANDA practice data.
+# Needs the repository secret AYESHA_OANDA_TOKEN (Settings -> Secrets and variables -> Actions).
+# Price data is used only inside the run and is never committed; the report is uploaded as an artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "History length in days (1095 = 3 years)"
+        default: "1095"
+      pairs:
+        description: "Comma-separated pairs"
+        default: "EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD,EURJPY"
+      split:
+        description: "In-sample / out-of-sample split date (YYYY-MM-DD); empty = middle of the data"
+        default: ""
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      AYESHA_OANDA_TOKEN: ${{ secrets.AYESHA_OANDA_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - working-directory: desktop
+        run: pip install -e .
+      - name: Check the token secret exists
+        run: |
+          if [ -z "$AYESHA_OANDA_TOKEN" ]; then
+            echo "::error::Add the repository secret AYESHA_OANDA_TOKEN (OANDA fxTrade Practice token) first."
+            exit 1
+          fi
+      - name: Export closed BID bars (M15 and M5) from OANDA
+        working-directory: desktop
+        run: |
+          mkdir -p ../bt-data
+          for p in $(echo "${{ inputs.pairs }}" | tr ',' ' '); do
+            python -m ayesha.cli export --feed oanda --symbol "$p" --tf M15 --days "${{ inputs.days }}" --out "../bt-data/${p}_M15.csv"
+            python -m ayesha.cli export --feed oanda --symbol "$p" --tf M5 --days "${{ inputs.days }}" --out "../bt-data/${p}_M5.csv"
+          done
+      - name: Build the validation report
+        working-directory: desktop
+        run: |
+          SPLIT="${{ inputs.split }}"
+          if [ -z "$SPLIT" ]; then SPLIT=$(date -u -d "-$(( ${{ inputs.days }} / 2 )) days" +%F); fi
+          python -m ayesha.cli report --data-dir ../bt-data --pairs "${{ inputs.pairs }}" --split "$SPLIT" --folds 4 \
+            --label "OANDA v20 practice BID bars, ${{ inputs.days }} days to $(date -u +%F), exported by GitHub Actions" \
+            --out ../backtest-report.json --md ../backtest-report.md
+          cat ../backtest-report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtest-report
+          path: |
+            backtest-report.json
+            backtest-report.md

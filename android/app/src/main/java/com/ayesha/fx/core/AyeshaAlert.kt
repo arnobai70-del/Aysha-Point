@@ -42,6 +42,8 @@ data class AyeshaAlert(
     val blockers: List<String> = emptyList(),
     /** True only when the message carried a valid signature for this phone's pairing code. */
     val signatureOk: Boolean = false,
+    /** PC multi-timeframe explanation (MTF=), see [Mtf]. Empty for TradingView alerts. */
+    val mtf: Map<String, String> = emptyMap(),
 ) {
     companion object {
         const val CHART_CANDIDATE = "CHART_CANDIDATE"
@@ -158,6 +160,7 @@ object AlertParser {
             expiresUtcMs = expU,
             blockers = keys["BLK"]?.split(',')?.filter { it.isNotBlank() && it != "NONE" } ?: emptyList(),
             signatureOk = signatureOk && origin == "PC",
+            mtf = Mtf.parse(keys["MTF"]),
         )
     }
 

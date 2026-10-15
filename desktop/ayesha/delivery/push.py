@@ -74,18 +74,41 @@ def _fmt(x: float, pair: str) -> str:
     return f"{x:.3f}" if pair.endswith("JPY") else f"{x:.5f}"
 
 
+# PC record status -> phone status (ST=). The phone only knows READY / WATCH / NO_TRADE from the PC.
+WIRE_STATUS = {"READY": "READY", "NOTIFIED": "READY", "WATCH": "WATCH", "WATCH_M5": "WATCH",
+               "NO_TRADE": "NO_TRADE", "CONFIRM_FAILED": "NO_TRADE"}
+MTF_KEYS = (("H4", "H4"), ("H1", "H1"), ("H1_LAST", "H1L"), ("H1_ZONE", "Z"), ("M15", "M15"), ("M5", "M5"))
+
+
+def format_mtf(mtf: dict[str, str] | None) -> str:
+    """Compact multi-timeframe explanation, e.g. H4:UP,H1:UP,H1L:BOS_UP,Z:DISCOUNT,M15:PDL_SWEEP>CHOCH>FVG,M5:OFF"""
+    if not mtf:
+        return "NA"
+    parts = []
+    for k, short in MTF_KEYS:
+        v = str(mtf.get(k, "")).replace(" ", "_").replace(",", "_").replace(":", "_")
+        if v:
+            parts.append(f"{short}:{v}")
+    return ",".join(parts) or "NA"
+
+
 def format_push(rec: dict[str, Any], tf_minutes: int = 15) -> str:
     """Canonical PC signal record -> AYESHA line format the phone parser reads."""
     pair = rec["pair"]
     tp = rec["take_profits"][-1]
     blk = ",".join(rec.get("blockers") or []) or "NONE"
+    st = WIRE_STATUS.get(rec["status"], "NO_TRADE")
     head = (f"AYESHA {rec['direction']} OANDA:{pair} TF={tf_minutes} E={_fmt(rec['entry'], pair)} "
             f"SL={_fmt(rec['stop_loss'], pair)} TP={_fmt(tp, pair)} RR={(rec.get('net_rr') or 0):.2f} "
             f"LOT={(rec.get('safe_lot') or 0):.2f} EXP=0 SRC={rec.get('liquidity_source') or 'NA'} "
-            f"TGT={rec.get('target_name') or 'NA'} BAR={_ms(rec['event_time_utc'])} ST={rec['status']} FROM=PC "
-            f"ID={rec['signal_id']} EXPU={_ms(rec['expires_at_utc'])} BLK={blk} V={rec['strategy_hash']}")
+            f"TGT={rec.get('target_name') or 'NA'} BAR={_ms(rec['event_time_utc'])} ST={st} FROM=PC "
+            f"ID={rec['signal_id']} EXPU={_ms(rec['expires_at_utc'])} BLK={blk} MTF={format_mtf(rec.get('mtf'))} "
+            f"V={rec['strategy_hash']}")
     why = (f"Why: {rec.get('setup', 'SWEEP_MSS_FVG')} score {rec.get('score_points')}/100 (rule points, not a probability); "
-           f"news {rec.get('news_verification')}; spread {rec.get('spread_pips')} pips (data feed)")
+           f"news {rec.get('news_verification')}; spread {rec.get('spread_pips')} pips (data feed)"
+           + ("; waiting for M5 confirmation, not an entry yet" if rec["status"] == "WATCH_M5" else "")
+           + ("; M5-confirmed: market entry near E, only for a few minutes"
+              if rec.get("entry_type") == "MARKET_AFTER_M5_CONFIRMATION" and st == "READY" else ""))
     return head + "\n" + why
 
 

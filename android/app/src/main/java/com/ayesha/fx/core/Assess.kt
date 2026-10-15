@@ -7,6 +7,8 @@ package com.ayesha.fx.core
  */
 data class Assessment(val state: String, val reasons: List<String>) {
     val actionable: Boolean get() = state == Assess.READY || state == Assess.CHART_CANDIDATE
+    /** Shown in the active list (WATCH too, but WATCH never raises an entry notification). */
+    val active: Boolean get() = actionable || state == Assess.WATCH
 }
 
 object Assess {
@@ -15,6 +17,7 @@ object Assess {
     const val NO_TRADE = "NO_TRADE"
     const val UNVERIFIED = "UNVERIFIED"
     const val EXPIRED = "EXPIRED"
+    const val WATCH = "WATCH"                     // PC: setup valid but not an entry yet (waiting for M5, or not A+)
 
     fun assess(
         a: AyeshaAlert,
@@ -25,6 +28,7 @@ object Assess {
     ): Assessment {
         val unverified = mutableListOf<String>()
         val noTrade = mutableListOf<String>()
+        val watch = mutableListOf<String>()
 
         if (a.barCloseMs == null) unverified.add("সিগন্যাল বারের সময় (BAR) নেই — পুরনো indicator")
         if (a.version != expectedHash) unverified.add("strategy version মেলে না (${a.version.ifBlank { "নেই" }} ≠ $expectedHash)")
@@ -38,7 +42,10 @@ object Assess {
             if (a.expiresUtcMs == null) unverified.add("PC expiry নেই")
             when (a.status) {
                 "READY" -> {}
-                "NO_TRADE", "WATCH" -> noTrade.add("PC: " + (a.blockers.ifEmpty { listOf(a.status) }).joinToString(", "))
+                "NO_TRADE" -> noTrade.add("PC: " + (a.blockers.ifEmpty { listOf(a.status) }).joinToString(", "))
+                "WATCH" -> if (a.blockers.isNotEmpty()) noTrade.add("PC: " + a.blockers.joinToString(", "))
+                    else watch.add(if (a.mtf["M5"] == "PENDING") "PC: M5 confirmation-এর অপেক্ষা, এখনো entry নয়"
+                        else "PC: setup বৈধ কিন্তু A+ নয়, শুধু নজরে রাখুন")
                 else -> unverified.add("অজানা PC status '${a.status}'")
             }
         } else {
@@ -56,6 +63,7 @@ object Assess {
             a.isExpired(nowMs) -> Assessment(EXPIRED, listOf("মেয়াদ শেষ") + unverified + noTrade)
             unverified.isNotEmpty() -> Assessment(UNVERIFIED, unverified + noTrade)
             noTrade.isNotEmpty() -> Assessment(NO_TRADE, noTrade)
+            watch.isNotEmpty() -> Assessment(WATCH, watch)
             a.isPc -> Assessment(READY, listOf("PC: নিউজ, feed spread, Exness spec (মালিক-নিশ্চিত) যাচাই হয়েছে"))
             else -> Assessment(CHART_CANDIDATE, listOf("চার্টের নিয়ম মিলেছে; নিউজ, আসল spread, Exness নিয়ম যাচাই হয়নি"))
         }

@@ -125,6 +125,20 @@ class Registry:
                         (signal_id, t, r["status"], to_status, note))
         self.db.commit()
 
+    def update_signal(self, rec: dict[str, Any], note: str = "") -> None:
+        """Replace the latest state of a signal (e.g. WATCH_M5 -> READY after M5 confirmation).
+        The previous state stays in signal_events; the new payload is the one the phone receives."""
+        r = self.db.execute("SELECT status FROM signals WHERE signal_id=?", (rec["signal_id"],)).fetchone()
+        if r is None:
+            raise KeyError(rec["signal_id"])
+        t = now_utc()
+        self.db.execute("UPDATE signals SET grade=?, status=?, expires_at_utc=?, payload=?, updated_at=? WHERE signal_id=?",
+                        (rec["grade"], rec["status"], rec.get("expires_at_utc"), json.dumps(rec, default=str), t,
+                         rec["signal_id"]))
+        self.db.execute("INSERT INTO signal_events (signal_id, at_utc, from_status, to_status, note) VALUES (?,?,?,?,?)",
+                        (rec["signal_id"], t, r["status"], rec["status"], note))
+        self.db.commit()
+
     def active(self, statuses: tuple[str, ...] = ("READY", "NOTIFIED", "WATCH")) -> list[dict[str, Any]]:
         q = f"SELECT signal_id FROM signals WHERE status IN ({','.join('?' * len(statuses))})"
         return [self.get(r["signal_id"]) for r in self.db.execute(q, statuses)]
@@ -137,14 +151,22 @@ class Registry:
         return self.db.execute("SELECT * FROM signal_events WHERE signal_id=? ORDER BY id", (signal_id,)).fetchall()
 
     # --- delivery --------------------------------------------------------------------------
-    def was_delivered(self, signal_id: str, channel: str) -> bool:
-        return self.db.execute("SELECT 1 FROM deliveries WHERE signal_id=? AND channel=? AND ok=1",
-                               (signal_id, channel)).fetchone() is not None
+    # One row per (signal, channel, status): a WATCH_M5 archive push does not count as the READY push.
+    # Rows written by 0.6.x used the bare channel name; they count as the READY delivery.
+    def was_delivered(self, signal_id: str, channel: str, status: str = "READY") -> bool:
+        keys = (f"{channel}:{status}", channel) if status == "READY" else (f"{channel}:{status}",)
+        q = f"SELECT 1 FROM deliveries WHERE signal_id=? AND ok=1 AND channel IN ({','.join('?' * len(keys))})"
+        return self.db.execute(q, (signal_id, *keys)).fetchone() is not None
 
-    def record_delivery(self, signal_id: str, channel: str, ok: bool, detail: str = "") -> None:
-        self.db.execute("INSERT OR REPLACE INTO deliveries VALUES (?,?,?,?,?)",
-                        (signal_id, channel, now_utc(), int(ok), detail))
-        self.db.commit()
+    def record_delivery(self, signal_id: str, channel: str, ok: bool, detail: str = "", status: str = "READY") -> None:
+        key = f"{channel}:{status}"
+        if ok or not self.was_delivered(signal_id, channel, status):
+            self.db.execute("INSERT OR REPLACE INTO deliveries VALUES (?,?,?,?,?)",
+                            (signal_id, key, now_utc(), int(ok), detail))
+            self.db.commit()
+
+    def deliveries(self, signal_id: str) -> list[sqlite3.Row]:
+        return self.db.execute("SELECT * FROM deliveries WHERE signal_id=? ORDER BY sent_at_utc", (signal_id,)).fetchall()
 
     # --- health / journal ------------------------------------------------------------------
     def health(self, state: str, symbol: str | None = None, detail: str = "") -> None:
