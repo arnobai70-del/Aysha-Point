@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ayesha-fx"
-version = "0.7.1"
+version = "0.8.0"
 description = "AYESHA FX: advisory-only ICT/SMC forex scanner, risk engine and replay backtester (no order execution)"
 requires-python = ">=3.11"
 dependencies = [
