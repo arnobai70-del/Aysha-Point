@@ -721,8 +721,14 @@ def cmd_push_test(a) -> int:  # pragma: no cover - network
     return 0 if ok else 1
 
 
+PER_PAIR_COST_LABELS = {"commission_per_lot_round_trip": "commission per 1 lot, round trip, USD (Standard: usually 0)",
+                        "stops_level_points": "stop level in points (Specification 'Stop level')"}
+
+
 def cmd_confirm_broker(a) -> int:  # interactive; tested through `setup` with piped answers
     """Per-pair Exness contract values typed from the Exness app, plus the account leverage."""
+    import math
+
     from ayesha.broker import FIELDS, load_assumed, load_confirmed, save_confirmed, save_leverage
 
     base = load_assumed(a.account_type)
@@ -746,13 +752,14 @@ def cmd_confirm_broker(a) -> int:  # interactive; tested through `setup` with pi
     for sym in pairs:
         vals = None
         if prev is not None:
-            k = _ask(f"{sym}: open {sym} -> Specification. Same contract size / min / step / max lot as {prev[0]}? "
-                     "Y = yes, I checked / N = type them / S = skip: ").upper()
+            k = _ask(f"{sym}: open {sym} -> Specification. Same contract size / min / step / max lot, commission "
+                     f"and stop level as {prev[0]}? Y = yes, I checked / N = type them / S = skip: ").upper()
             if k == "S":
                 print(f"  {sym} skipped: it stays unverified (no READY for {sym}).")
                 continue
             if k == "Y":
-                vals = {f: prev[1][f] for f in FIELDS}
+                vals = {f: prev[1][f] for f in FIELDS + tuple(PER_PAIR_COST_LABELS)}
+        old = load_confirmed(a.account_type, None, sym) or {}
         if vals is None:
             print(f"{sym}: Exness app -> {sym} -> Specification")
             vals = {}
@@ -767,7 +774,19 @@ def cmd_confirm_broker(a) -> int:  # interactive; tested through `setup` with pi
                     except ValueError:
                         pass
                     print("  Please type a positive number.")
-        old = load_confirmed(a.account_type, None, sym) or {}
+            # spec C04: commission and stop level are confirmed per pair too, not left as repo assumptions
+            for f, label in PER_PAIR_COST_LABELS.items():
+                dflt = old.get(f, base.get(f, 0))
+                while True:
+                    raw = _ask(f"  {label} (Enter = {dflt:g}): ")
+                    try:
+                        v = float(raw) if raw else float(dflt)
+                        if math.isfinite(v) and v >= 0 and (f != "stops_level_points" or v.is_integer()):
+                            vals[f] = v
+                            break
+                    except ValueError:
+                        pass
+                    print("  Please type 0 or a positive number" + (" (whole points)." if f == "stops_level_points" else "."))
         dflt = old.get("typical_spread_pips", base.get("typical_spread_pips", 1.0))
         raw = _ask(f"  {sym} typical spread in pips when the market is calm (Enter = {dflt}): ")
         try:

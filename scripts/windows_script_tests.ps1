@@ -29,9 +29,9 @@ function Expect([string]$name, $r, [int]$code, [string[]]$texts) {
 Expect "start before install" (Run "start-ayesha.bat" "" "") 1 @("Run install.bat first")
 Expect "local backtest before install" (Run "backtest-local.bat" "" "") 1 @("Run install.bat first")
 
-# token, Exness equity, open trades (none), leverage, EURUSD contract (4 values) + spread,
-# five more pairs "same values, I checked" + spread, Startup? N
-$lines = @($tok, "25", "", "2000", "100000", "0.01", "0.01", "200", "")
+# token, Exness equity, open trades (none), leverage, EURUSD contract (4 values) + commission + stop level
+# + spread, five more pairs "same values, I checked" + spread, Startup? N
+$lines = @($tok, "25", "", "2000", "100000", "0.01", "0.01", "200", "", "", "")
 for ($i = 0; $i -lt 5; $i++) { $lines += @("Y", "") }
 $lines += "N"
 $answers = ($lines -join "`r`n") + "`r`n"

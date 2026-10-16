@@ -36,7 +36,7 @@ equity বদলালে (ডিপোজিট, উইথড্র, লাভ-
 ## Exness contract নিশ্চিত করা (একবার, প্রতিটা পেয়ার)
 PC-তে: `python -m ayesha.cli confirm-broker --account-type Standard`
 প্রথমে account leverage (যেমন `2000`), তারপর প্রতিটা পেয়ারের জন্য Exness অ্যাপ → পেয়ার → **Specification** খুলে contract size,
-min lot, step, max lot হুবহু টাইপ করুন। শুধু EURUSD দেখে অন্য পেয়ার নিশ্চিত হয় না: যে পেয়ার নিশ্চিত করা হয়নি তার সিগন্যাল
+min lot, step, max lot, commission (Standard-এ সাধারণত ০) আর stop level (points) হুবহু টাইপ করুন। শুধু EURUSD দেখে অন্য পেয়ার নিশ্চিত হয় না: যে পেয়ার নিশ্চিত করা হয়নি তার সিগন্যাল
 `BROKER_SPEC_UNVERIFIED` থাকবে, READY হবে না। মানগুলো শুধু আপনার PC-তে থাকে।
 
 ## ফোন জোড়া লাগানো (একবার)

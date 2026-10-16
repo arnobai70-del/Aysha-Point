@@ -272,9 +272,9 @@ def test_setup_runs_unattended_and_is_rerunnable(monkeypatch, tmp_path, capsys):
         def isatty(self):
             return False
 
-    # token, equity, open trades (none), leverage, EURUSD 4 contract values + spread, then the other
-    # five pairs: "same values, I checked" + spread
-    monkeypatch.setattr("sys.stdin", In(f"{TOK}\n25\n\n2000\n100000\n0.01\n0.01\n200\n\n" + "Y\n\n" * 5))
+    # token, equity, open trades (none), leverage, EURUSD 4 contract values + commission 0 (Enter) +
+    # stop level 10 + spread, then the other five pairs: "same values, I checked" + spread
+    monkeypatch.setattr("sys.stdin", In(f"{TOK}\n25\n\n2000\n100000\n0.01\n0.01\n200\n\n10\n\n" + "Y\n\n" * 5))
     assert cli.main(["setup", "--no-publish"]) == 0
     assert st.v[c.TOKEN_ENV] == TOK
     assert not (tmp_path / "equity.txt").exists()
@@ -284,6 +284,9 @@ def test_setup_runs_unattended_and_is_rerunnable(monkeypatch, tmp_path, capsys):
     bfile = tmp_path / "broker-confirmed.json"
     assert confirmed_symbols("Standard", bfile) == sorted(load_spec()["pairs"]["enabled"])
     assert load_confirmed("Standard", bfile, "GBPUSD")["volume_min"] == 0.01
+    eu, gu = load_confirmed("Standard", bfile, "EURUSD"), load_confirmed("Standard", bfile, "GBPUSD")
+    assert (eu["commission_per_lot_round_trip"], eu["stops_level_points"]) == (0, 10)  # typed per pair (C04)
+    assert (gu["commission_per_lot_round_trip"], gu["stops_level_points"]) == (0, 10)  # "Y" copies what was checked
     assert load_leverage("Standard", bfile) == 2000
     assert (tmp_path / "pairing-code.txt").exists()
     code = (tmp_path / "pairing-code.txt").read_text()

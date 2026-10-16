@@ -20,7 +20,7 @@
    - **2/5 Capital**: Exness অ্যাপ → Accounts-এ যে **equity** দেখায়, USD-তে, যেমন `25`; তারপর খোলা ট্রেড (না থাকলে Enter)।
    - **3/5 Exness contract per pair**: প্রথমে account leverage (যেমন `2000`, unlimited হলে `U`)। তারপর প্রতিটা পেয়ার
      (EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, EURJPY): Exness অ্যাপ → পেয়ার → ⓘ Specification থেকে contract size, min lot,
-     step, max lot হুবহু, আর শান্ত বাজারে সাধারণ spread (pip)। পরের পেয়ারে মান একই হলে `Y` (শুধু অ্যাপে দেখে নিয়ে), আলাদা হলে
+     step, max lot, commission আর stop level হুবহু (দুটোই ০ হলে Enter), আর শান্ত বাজারে সাধারণ spread (pip)। পরের পেয়ারে মান একই হলে `Y` (শুধু অ্যাপে দেখে নিয়ে), আলাদা হলে
      `N`, বাদ দিতে `S` (সেই পেয়ারে READY হবে না)।
    - **4/5 Pairing code**: লিখে রাখুন (ফোনে লাগবে)।
    - **Start automatically?**: চাইলে `Y`।
