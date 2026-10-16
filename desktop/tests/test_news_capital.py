@@ -739,7 +739,7 @@ def _assert_matches_schema(rec):
     """The PC record and contracts/signal.schema.json stay aligned (no silent protocol change)."""
     from pathlib import Path
 
-    schema = json.loads((Path(__file__).resolve().parents[2] / "contracts" / "signal.schema.json").read_text())
+    schema = json.loads((Path(__file__).resolve().parents[2] / "contracts" / "signal.schema.json").read_text(encoding="utf-8"))
     props = schema["properties"]
     assert set(schema["required"]) <= set(rec), set(schema["required"]) - set(rec)
     assert set(rec) <= set(props), f"fields missing from the schema: {sorted(set(rec) - set(props))}"

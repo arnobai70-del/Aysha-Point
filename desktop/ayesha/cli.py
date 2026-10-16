@@ -821,7 +821,20 @@ def _write_trades(path: str, trades) -> None:
                         s.targets[-1], t.status, t.exit_reason, t.r, "|".join(t.blockers)])
 
 
+def _safe_console() -> None:
+    """A redirected Windows console (cp1252) cannot print every character in a report; replace those
+    instead of crashing. Files are always written as UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        enc = (getattr(stream, "encoding", None) or "").lower().replace("-", "")
+        if enc and enc != "utf8" and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _safe_console()
     a = build_parser().parse_args(argv)
     return a.fn(a)
 

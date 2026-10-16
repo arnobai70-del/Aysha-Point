@@ -103,7 +103,7 @@ def test_report_cli_on_synthetic_csv(tmp_path, capsys):
     rep = json.loads(out.read_text())
     assert set(rep["runs"]) == {"EURUSD|m15", "EURUSD|m5confirm"}
     assert any("GBPUSD_M15.csv" in m for m in rep["missing_files"])
-    txt = md.read_text()
+    txt = md.read_text(encoding="utf-8")
     assert "SYNTHETIC test data" in txt and "NOT modelled" in txt
 
 

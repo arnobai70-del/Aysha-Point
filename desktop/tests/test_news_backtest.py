@@ -313,7 +313,7 @@ def test_report_cli_runs_the_news_comparison(tmp_path, spec, market):
     assert run["news_mode"] == "upgraded" and set(run["news_comparison"]["modes"]) == set(NEWS_MODES)
     assert rep["news"]["calendar_file"] == "calendar.csv" and len(rep["news"]["calendar_sha256"]) == 64
     assert run["news_stability_bars"] == "M5 closed bars"
-    assert "News comparison on the same candles" in md.read_text()
+    assert "News comparison on the same candles" in md.read_text(encoding="utf-8")
 
 
 def test_backtest_run_rejects_a_missing_news_file(tmp_path, capsys):

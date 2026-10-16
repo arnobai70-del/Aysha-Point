@@ -302,7 +302,7 @@ def to_markdown(rep: dict[str, Any]) -> str:
           f"legacy vs upgraded comparison {'run' if nw.get('comparison_run') else '**NOT RUN (BLOCKED BY DATA)**'}; "
           f"**{nw.get('direction', 'NEWS DIRECTION NOT BACKTESTED')}**.", ""]
     for w in nw.get("warnings", []):
-        L.append(f"- ⚠️ {w}")
+        L.append(f"- WARNING {w}")
     if nw.get("warnings"):
         L.append("")
     L += ["| Run | Bars | Closed | Win rate (95% CI) | Expectancy R | PF | Max DD R | News |", "|---|---|---|---|---|---|---|---|"]
