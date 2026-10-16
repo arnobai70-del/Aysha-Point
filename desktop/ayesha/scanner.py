@@ -239,11 +239,15 @@ class Scanner:
                       "scenario": scenario_card(e, main) if phase in ("UPCOMING", "PRE_EVENT_LOCKOUT") else None,
                       "reaction": None}
             if phase == "WINDOW_END":
+                # one post-news summary: as soon as closed M5 bars show the market settled, else 20 min after
+                # the window (the guard keeps blocking READY until it settles either way)
                 try:
                     notice["reaction"] = self.news.reaction_for(
                         e, main, now, lambda a, b, s=main: self.feed.candles(s, "M5", a, b), self._pip(main))
                 except Exception as ex:
                     notice["reaction"] = {"state": "UNAVAILABLE", "error": type(ex).__name__}
+                if not notice["reaction"].get("market_settled") and now < end + timedelta(minutes=20):
+                    continue
             for n in todo:
                 try:
                     ok, detail = n.news(notice, self.spec["strategy_hash"])

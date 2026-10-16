@@ -229,13 +229,32 @@ FIXTURE_REC = {
 }
 
 
+NEWS_FIXTURE = FIXTURE.with_name("pc-news-lockout.txt")
+NEWS_NOTICE = {
+    "event_id": "4d591d3541bb", "title": "CPI m/m", "currency": "USD", "impact": "HIGH", "tier": "TOP_DATA",
+    "time_utc": "2026-10-15T12:30:00+00:00", "state": "SCHEDULED", "phase": "PRE_EVENT_LOCKOUT",
+    "pairs": ["EURUSD", "USDJPY"], "window_start_utc": "2026-10-15T11:45:00+00:00",
+    "window_end_utc": "2026-10-15T13:00:00+00:00", "provider": "FOREXFACTORY_WEEKLY_EXPORT",
+    "verified_at_utc": "2026-10-15T10:00:00+00:00", "forecast": "0.3%", "previous": "0.2%",
+    "sent_at_utc": "2026-10-15T11:45:10+00:00", "reaction": None,
+    "scenario": {"summary": "Above forecast 0.3%: USD could be stronger (EURUSD down), all else equal; below: the "
+                            "opposite. Not a prediction."},
+}
+
+
+def _fixtures():
+    return {FIXTURE: push.signed(PARITY_CODE, push.format_push(FIXTURE_REC, code=PARITY_CODE)),
+            NEWS_FIXTURE: push.signed(PARITY_CODE, push.format_news(NEWS_NOTICE, "FIXTUREHASH"))}
+
+
 def test_pc_push_fixture_is_current():
-    """contracts/fixtures/pc-push-ready.txt is read by the Android parser test (cross-language parity)."""
-    msg = push.signed(PARITY_CODE, push.format_push(FIXTURE_REC, code=PARITY_CODE))
-    if FIXTURE.read_text(encoding="utf-8") != msg:
-        raise AssertionError("fixture out of date; regenerate with: python -c 'from tests.test_no_mt5_path import "
-                             "write_fixture; write_fixture()' (from desktop/)")
+    """contracts/fixtures/pc-*.txt are read by the Android parser tests (cross-language parity)."""
+    for path, msg in _fixtures().items():
+        if not path.exists() or path.read_text(encoding="utf-8") != msg:
+            raise AssertionError(f"{path.name} out of date; regenerate with: python -c 'from tests.test_no_mt5_path "
+                                 "import write_fixture; write_fixture()' (from desktop/)")
 
 
 def write_fixture():
-    FIXTURE.write_text(push.signed(PARITY_CODE, push.format_push(FIXTURE_REC, code=PARITY_CODE)), encoding="utf-8")
+    for path, msg in _fixtures().items():
+        path.write_text(msg, encoding="utf-8")

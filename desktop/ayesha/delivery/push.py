@@ -19,7 +19,8 @@ Wire format 4 (one alert):
     SIG=<hex>
 News watch (information only, never a trade signal):
     AYESHA NEWS ID=<event id> CCY=USD IMP=HIGH TIER=TOP_DATA T=<ms> PH=UPCOMING|PRE_EVENT_LOCKOUT|RELEASED|WINDOW_END
-        ST=<event state> WS=<ms> WE=<ms> SRC=<provider> VER=<ms> PAIRS=EURUSD,USDJPY SENT=<ms> V=<hash>
+        ST=<event state> WS=<ms> WE=<ms> SRC=<provider> VER=<ms> PAIRS=EURUSD,USDJPY SENT=<ms>
+        RX=<reaction state|NA> SET=<Y|N|NA: market settled after the window> V=<hash>
     Title: ... / Forecast: ... / Scenario: ... / Reaction: ... / Protection: ...
     SIG=<hex>
 Heartbeat:
@@ -157,6 +158,8 @@ def format_news(n: dict[str, Any], strategy_hash: str) -> str:
             f"TIER={_tok(n['tier'])} T={_ms(n['time_utc'])} PH={n['phase']} ST={_tok(n.get('state'), 'SCHEDULED')} "
             f"WS={_ms(n['window_start_utc'])} WE={_ms(n['window_end_utc'])} SRC={_tok(n.get('provider'))} "
             f"VER={_ms(n.get('verified_at_utc'))} PAIRS={','.join(n['pairs'])} SENT={_ms(n['sent_at_utc'])} "
+            f"RX={_tok((n.get('reaction') or {}).get('state'))} "
+            f"SET={'NA' if not n.get('reaction') else 'Y' if n['reaction'].get('market_settled') else 'N'} "
             f"V={strategy_hash}")
     lines = [head, "Title: " + " ".join(str(n["title"]).split())[:120],
              f"Forecast: {n.get('forecast') or 'NA'} | Previous: {n.get('previous') or 'NA'}"]

@@ -448,10 +448,16 @@ def test_n11_news_watch_ready_and_heartbeat_are_signed_and_distinct(spec, tmp_pa
     sc.clock_t[0] = E + timedelta(minutes=1)
     sc.news_notices()
     sc.clock_t[0] = E + timedelta(minutes=31)
+    sc.news_notices()  # window over, but no closed M5 bar after it yet: no summary yet
+    assert " PH=RELEASED " in [m for m in bus.msgs if m.startswith("AYESHA NEWS")][-1]
+    sc.clock_t[0] = E + timedelta(minutes=41)
+    sc.news_notices()  # two calm closed bars after the window: the post-news summary goes out once
     sc.news_notices()
     phases = [m.split(" PH=")[1].split()[0] for m in bus.msgs if m and m.startswith("AYESHA NEWS")]
     assert phases == ["UPCOMING", "PRE_EVENT_LOCKOUT", "RELEASED", "WINDOW_END"]
-    assert "Reaction:" in [m for m in bus.msgs if m.startswith("AYESHA NEWS")][-1]
+    last = [m for m in bus.msgs if m.startswith("AYESHA NEWS")][-1]
+    assert "Reaction:" in last and " SET=Y " in last and " RX=" in last
+    assert " SET=NA " in [m for m in bus.msgs if m.startswith("AYESHA NEWS")][0]
     sc.heartbeat(force_state="OK")
     assert bus.msgs[-1].startswith("AYESHA HB") and " CAP=OK" in bus.msgs[-1]
     # every message on the relay verifies with the pairing code

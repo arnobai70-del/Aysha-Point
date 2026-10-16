@@ -1,0 +1,6 @@
+AYESHA NEWS ID=4d591d3541bb CCY=USD IMP=HIGH TIER=TOP_DATA T=1792067400000 PH=PRE_EVENT_LOCKOUT ST=SCHEDULED WS=1792064700000 WE=1792069200000 SRC=FOREXFACTORY_WEEKLY_EXPORT VER=1792058400000 PAIRS=EURUSD,USDJPY SENT=1792064710000 RX=NA SET=NA V=FIXTUREHASH
+Title: CPI m/m
+Forecast: 0.3% | Previous: 0.2%
+Scenario: Above forecast 0.3%: USD could be stronger (EURUSD down), all else equal; below: the opposite. Not a prediction.
+Protection: new trades blocked on EURUSD, USDJPY during the window and until spread and volatility settle. Review any open trade, stop-loss and possible gap/slippage. Not a trade signal.
+SIG=fef411116d6d3e892c28e3b5ff3912f8
