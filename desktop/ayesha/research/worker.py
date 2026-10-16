@@ -301,8 +301,8 @@ def child_main(argv: list[str] | None = None) -> int:
     if os.name != "nt":
         applied += _posix_limits(job["limits"])
         _parent_watchdog(int(job["supervisor_pid"]))
-    print(f"worker {job['job_id']} kind={job['kind']} pid={os.getpid()} limits={','.join(applied) or 'none'}",
-          flush=True)
+    own = ",".join(applied) or ("set by the launcher" if os.name == "nt" else "none")  # Windows: job object
+    print(f"worker {job['job_id']} kind={job['kind']} pid={os.getpid()} limits={own}", flush=True)
     result_file = job_file.with_suffix(".result.json")
     lock = lock_for(Path(job["root"]))
     if not lock.acquire():
@@ -391,6 +391,8 @@ def run_job(ws, kind: str, args: dict[str, Any], timeout: float | None = None,
                 applied += winjob.applied
             except OSError as e:
                 applied.append(f"job-object-unavailable({e.args[0] if e.args else '?'})")
+            if echo:
+                echo(f"launcher limits: {', '.join(applied)}")
         pos = 0
         try:
             while True:
