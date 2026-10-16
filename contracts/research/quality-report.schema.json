@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arnobai70-del/Aysha-Point/contracts/research/quality-report.schema.json",
+  "title": "Dataset partition quality report (research.quality_report/1)",
+  "description": "Facts about one symbol/timeframe partition: what was wrong, how often, where, and the acceptance decision. Data is never repaired: no forward fill, no synthetic bars.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "symbol",
+    "timeframe",
+    "rows_in",
+    "rows_out",
+    "start_utc",
+    "end_utc",
+    "expected_bars",
+    "missing_bars",
+    "coverage_percent",
+    "longest_gap_bars",
+    "issues",
+    "bars_by_session",
+    "missing_by_session",
+    "policy",
+    "decision"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "research.quality_report/1"
+    },
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Z]{6}$"
+    },
+    "timeframe": {
+      "enum": [
+        "M5",
+        "M15"
+      ]
+    },
+    "rows_in": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rows_out": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "start_utc": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "utc-date-time"
+    },
+    "end_utc": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "utc-date-time"
+    },
+    "expected_bars": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "missing_bars": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "coverage_percent": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "longest_gap_bars": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "severity",
+          "count",
+          "examples"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z_]+$"
+          },
+          "severity": {
+            "enum": [
+              "HIGH",
+              "MEDIUM",
+              "INFO"
+            ]
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "examples": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "bars_by_session": {
+      "type": "object"
+    },
+    "missing_by_session": {
+      "type": "object"
+    },
+    "policy": {
+      "type": "object"
+    },
+    "decision": {
+      "enum": [
+        "PASS",
+        "DEGRADED",
+        "REJECTED"
+      ]
+    }
+  }
+}

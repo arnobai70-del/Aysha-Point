@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arnobai70-del/Aysha-Point/contracts/research/model-card.schema.json",
+  "title": "Model card (research.model_card/1), reserved",
+  "description": "Reserved for the optional ML lab (plan v1.2.0). No model exists in v0.9.x and nothing writes this record. A model can never open a live gate; its furthest state is REVIEW_ELIGIBLE, and any failed drift, data or safety check is SUSPENDED.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_id",
+    "model_version",
+    "feature_set",
+    "target",
+    "label_horizon",
+    "training_snapshot",
+    "windows",
+    "hyperparameters_hash",
+    "seed",
+    "software_environment_hash",
+    "metrics_by_regime",
+    "calibration",
+    "stress",
+    "drift_reference",
+    "known_limits",
+    "promotion_status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "research.model_card/1"
+    },
+    "model_id": {
+      "type": "string"
+    },
+    "model_version": {
+      "type": "string"
+    },
+    "feature_set": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "label_horizon": {
+      "type": "string"
+    },
+    "training_snapshot": {
+      "type": "string",
+      "pattern": "^ds_[0-9a-f]{16}$"
+    },
+    "windows": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "train",
+        "validation",
+        "test"
+      ],
+      "properties": {
+        "train": {
+          "type": "object"
+        },
+        "validation": {
+          "type": "object"
+        },
+        "test": {
+          "type": "object"
+        }
+      }
+    },
+    "hyperparameters_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "seed": {
+      "type": "integer"
+    },
+    "software_environment_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "metrics_by_regime": {
+      "type": "object"
+    },
+    "calibration": {
+      "type": "object"
+    },
+    "stress": {
+      "type": "object"
+    },
+    "drift_reference": {
+      "type": "object"
+    },
+    "known_limits": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "promotion_status": {
+      "enum": [
+        "DRAFT",
+        "TRAINED",
+        "BACKTESTED",
+        "OOS_REVIEWED",
+        "PAPER_OBSERVATION",
+        "REVIEW_ELIGIBLE",
+        "SUSPENDED"
+      ]
+    }
+  }
+}

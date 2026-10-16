@@ -1,4 +1,4 @@
-# Master plan section Z: checklist with evidence (release 0.8.0)
+# Master plan section Z: checklist with evidence (release 0.9.0)
 
 Source: [master plan section Z](AYESHA_AI_FOREX_TRADING_ASSISTANT_MASTER_PLAN.md). Status words:
 **DONE** = built and proven by an automated test or a committed file (evidence named) ·
@@ -29,11 +29,11 @@ Test names refer to `desktop/tests/*.py` (Python) and `android/app/src/test/.../
 | Git repo initialized | DONE | `main` branch |
 | README, MASTER_SPEC, rulebook, glossary | PARTIAL | README, master plan, strategy spec, STATUS/DECISIONS/VERIFICATION; no glossary |
 | Gitignore and `.env.example` | PARTIAL | `.gitignore`; no `.env` used (token lives in the Windows user environment) |
-| Branch / PR policy, labels, milestones | CHANGED | Owner asked for direct pushes to `main` |
+| Branch / PR policy, labels, milestones | CHANGED | Owner asked for direct pushes to `main`; for the Hybrid AI plan each milestone goes on its own branch and pull request, merged only with the owner's approval (DECISIONS 2026-10-16) |
 | CI: Python tests | DONE | `ci` workflow, Ubuntu + Windows (lint/typecheck not configured) |
 | CI: Android unit/build | DONE | `build-android` workflow runs JVM tests and builds the APK |
 | CI: Pine static check | DONE | `generate_pine.py --check`, `test_pine_alert_payload_matches_phone_parser` |
-| Dependency lockfiles, vulnerability scanning | OPEN | |
+| Dependency lockfiles, vulnerability scanning | PARTIAL | `pip-audit` of the runtime dependencies in `research-ci` (informational); no lock file yet |
 | Secrets scan | DONE | `scripts/check_no_secrets.py` in the CI step "Workflow and secret hygiene" (OANDA-token shape, private keys, keystores, GitHub/AWS/Telegram tokens) |
 | Release tag/changelog/versioning | DONE | `contracts/version.json`, `test_version_manifest_matches_components`, release tag `android-v<ver>-b<run>` |
 | Docs + checklist updated per feature commit | PARTIAL | Done for each release; not enforced by CI |
@@ -208,3 +208,21 @@ Full test mapping: [VERIFICATION.md](VERIFICATION.md) (N01–N12, C01–C10, I01
 | Docs and Bangla owner guide | DONE | [11-news-and-capital-guide.md](11-news-and-capital-guide.md), README, STATUS, CHANGELOG |
 | Real PC, Android 13, Pine compile, Exness specs observed (I05) | OWNER | not observed yet |
 | Forward paper period before real money (I06) | OWNER | at least 30 trading days on demo/paper (docs/11 section জ) |
+
+## Hybrid Advanced AI plan v1.0 (release 0.9.0)
+Plan: [HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md). Test mapping: [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md).
+
+| Item | Status | Evidence / note |
+|---|---|---|
+| CP-00 non-mutating audit and baseline (G0) | DONE | Audit report (179 tests, all scans, CI on `7e7da2e`); golden fingerprint commit `33f9342` |
+| Research off by default, research-only, never READY, no orders | DONE | T05, T06, isolation check |
+| Legacy scanner, risk, news, capital, spec, schema, wire 4, Pine, Windows setup, Android unchanged | DONE | 65 protected files byte-identical (`test_t06_protected_legacy_files_are_byte_identical`) |
+| Frozen datasets, quality gate, provenance | DONE (code) | T01, `test_datasets.py`; real data PENDING OWNER |
+| Separate research registry, backup, restore, audit | DONE | `test_registry.py` |
+| Baseline parity adapter | DONE (synthetic) | `test_baseline_parity.py`; real data PENDING OWNER |
+| Worker isolation and research doctor | DONE | T07 |
+| Read-only local dashboard | DONE (code) | T08; owner PC PENDING OWNER |
+| Docs: data policy, acceptance, governance, rollback, Bangla guide | DONE | docs/RESEARCH_*.md, MODEL_GOVERNANCE.md, RELEASE_ROLLBACK.md, 12-research-guide.md |
+| Owner merge approval of the v0.9.0 pull request | OWNER | branch `research/v0.9.0` |
+| v1.0.0 to v1.3.0 (strategy lab, regimes, ML, phone research tab) | OPEN | not started; each needs the owner's go-ahead |
+

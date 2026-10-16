@@ -856,6 +856,13 @@ def _write_trades(path: str, trades) -> None:
                         s.targets[-1], t.status, t.exit_reason, t.r, "|".join(t.blockers)])
 
 
+def cmd_research(a) -> int:
+    """Research plane (research-only, OFF by default). Imported only here, so the scanner never loads it."""
+    from ayesha.research.cli import main as research_main
+
+    return research_main(a.args, spec=a.spec)
+
+
 def _safe_console() -> None:
     """A redirected Windows console (cp1252) cannot print every character in a report; replace those
     instead of crashing. Files are always written as UTF-8."""
@@ -1037,6 +1044,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--db", help=argparse.SUPPRESS)
     s.add_argument("--file", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_capital)
+
+    # Additive (v0.9.0): every option after `research` belongs to the research command line.
+    s = sub.add_parser("research", add_help=False, prefix_chars="\x00",
+                       help="research plane (research-only, OFF by default): ayesha research --help")
+    s.add_argument("args", nargs=argparse.REMAINDER)
+    s.set_defaults(fn=cmd_research)
 
     return p
 

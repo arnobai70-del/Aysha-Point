@@ -1,4 +1,4 @@
-# Security notes (credentials, workflows, signing, capital) — release 0.8.0
+# Security notes (credentials, workflows, signing, capital, research) — release 0.9.0
 
 The repository is **public**. Nothing secret may ever be committed; CI enforces this with
 `scripts/check_no_secrets.py` (OANDA-token shape, private keys, keystores, GitHub/AWS/Telegram tokens).
@@ -50,3 +50,29 @@ signs the APK (`Signing self-test` step) and prints the signer SHA-256 in each r
   (`backtest-local.bat --news ...`); the report records only its file name (no folder path) and SHA-256.
 - **Orders:** news, capital and scores can only block. Nothing in the PC or phone code can place, modify or close an
   order (`scripts/check_no_order_api.py`).
+
+## Research plane (0.9.0)
+- **Off by default.** Nothing under `%AYESHA_HOME%\research\` exists until `ayesha research enable`. The scanner
+  never imports research (CI isolation check), and research cannot import the phone delivery, signing, capital,
+  credential or live-registry code, `pickle`/`marshal`/`shelve`, or call `eval`/`exec`/`os.system`/`shell=True`.
+  `subprocess` is allowed only in the worker, `urllib.request` only in the OANDA ingest, and HTTP serving only in the
+  dashboard (`scripts/check_research_isolation.py`).
+- **Token:** research uses the token only through the legacy OANDA adapter at download time. The raw artifact keeps
+  response bodies and request paths, never headers; job files never contain it; logs, job records, dashboard pages and
+  exports pass through a redactor (Bearer headers, OANDA-token shape, pairing codes, `key=value` secrets, user names).
+  Tests: `test_oanda_ingest_keeps_ask_close_and_never_writes_the_token`,
+  `test_research_files_never_hold_the_token_or_pairing_code`, `test_worker_logs_and_records_are_redacted`.
+- **Live registry:** opened only with SQLite `mode=ro`; the dashboard's live view hides lot sizes and money
+  (`test_t05_research_cannot_write_the_live_registry`, `test_live_registry_view_is_read_only_and_hides_money`).
+- **Dashboard:** bound to 127.0.0.1 only; a new random key per start, passed once in the link and then kept in an
+  HttpOnly, SameSite=Strict cookie; requests without it get 401; a Host header other than 127.0.0.1/localhost gets 403
+  (DNS rebinding); only GET and HEAD (others 405), so there is no state-changing request to forge; CSP
+  `default-src 'none'` (no scripts at all), no framing, no referrer, no caching; every value HTML-escaped and redacted.
+  `ayesha research dashboard --check` runs 15 of these checks against a live instance. Do not share the printed link.
+- **Integrity:** artifacts are content-addressed and re-hashed on every read; the registry has a hash-linked audit
+  trail; backups are integrity-checked with a `.sha256` file; a restore refuses tampered or foreign files.
+- **Supply chain:** no new dependency. `pip-audit` runs in `research-ci` as information; the `research-ci` workflow
+  has `permissions: contents: read` and `persist-credentials: false` and uses no secret.
+- **Data:** owner datasets, `research.db`, reports and logs stay on the PC; only synthetic test data is in the
+  repository. See [RESEARCH_DATA_POLICY.md](RESEARCH_DATA_POLICY.md).
+

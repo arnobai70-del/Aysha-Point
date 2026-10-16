@@ -1,4 +1,4 @@
-# Verification checklist (acceptance tests, updated for 0.8.0)
+# Verification checklist (acceptance tests, updated for 0.9.0)
 
 Legend: **CI** = proven by an automated test on GitHub Actions (test name given) · **PARTIAL** = part proven, rest pending ·
 **PENDING OWNER** = needs the owner's account, phone or authorization · **OPEN** = not built yet.
@@ -84,9 +84,31 @@ fixture data: none of these proves that the strategy or the news protection make
 | C09 | Update Capital persists and refreshes PC sizing; phone mismatch visible; no equity on the relay | CI | `test_c09_capital_updates_reach_the_scanner_and_never_the_relay`; Kotlin `capitalDigestMatchesPythonVector`, `heartbeatCarriesPcCapitalStatus`. Phone screen: PENDING OWNER |
 | C10 | News/score cannot bypass daily or capital rules; unknown values fail closed | CI | `test_c10_news_and_scores_never_bypass_capital_or_daily_rules` |
 | B4/B5 | Weekly drawdown and expiry warnings (warnings only); risk history view | CI | `test_b4_weekly_drawdown_excludes_cash_flows_and_is_only_a_warning`, `test_b4_confirmation_expiry_warning_before_it_goes_stale`, `test_b5_capital_history_shows_snapshots_change_journal_and_warnings`, `test_doctor_shows_capital_warnings_as_codes_without_amounts` |
-| I01 | Windows/Ubuntu Python, Android unit/build, relay, news source green on the same commit | CI | Commit `c8dc37f` (release 0.8.0): [ci run 38881922779](https://github.com/arnobai70-del/Aysha-Point/actions/runs/38881922779) (desktop ubuntu + windows, relay, news) and [build-android run 38881922812](https://github.com/arnobai70-del/Aysha-Point/actions/runs/38881922812) (JVM tests + APK), release [android-v0.5.0-b9](https://github.com/arnobai70-del/Aysha-Point/releases/tag/android-v0.5.0-b9). Docs-only commits after it run `ci` only |
+| I01 | Windows/Ubuntu Python, Android unit/build, relay, news source green on the same commit | CI | Commit `c8dc37f` (release 0.8.0): [ci run 38881922779](https://github.com/arnobai70-del/Aysha-Point/actions/runs/38881922779) (desktop ubuntu + windows, relay, news) and [build-android run 38881922812](https://github.com/arnobai70-del/Aysha-Point/actions/runs/38881922812) (JVM tests + APK), release [android-v0.5.0-b9](https://github.com/arnobai70-del/Aysha-Point/releases/tag/android-v0.5.0-b9). The two commits after it, `617f16c` and `7e7da2e`, changed `desktop/ayesha/cli.py` (not docs only, as this line said before) and passed `ci` ([run 38885747004](https://github.com/arnobai70-del/Aysha-Point/actions/runs/38885747004) on `7e7da2e`); `android/**` did not change, so the APK stayed b9 |
 | I02 | Integration fixture: event → block → stabilisation → risk → signed phone explanation, no order | CI | `test_i02_event_block_stabilise_then_signed_ready` (record checked against `contracts/signal.schema.json` 1.1); no order API anywhere (`test_repo_has_no_order_api`) |
 | I03 | Backtest output has data source, as-of integrity, incomplete-news warning, real sample sizes, no invented win rate | CI (synthetic) | `test_report_compares_news_modes_with_integrity_and_sample_sizes`, `test_incomplete_calendar_is_reported_and_fails_closed`, `test_report_on_synthetic_data_is_labelled`; without a calendar the report says `NOT RUN (BLOCKED BY DATA)` and always `NEWS DIRECTION NOT BACKTESTED` |
 | I04 | News off vs on uses the same candles; cost-adjusted OOS comparison | CI (synthetic) + BLOCKED BY DATA | `test_news_modes_share_candles_and_signals`, `test_upgraded_blocks_everything_legacy_blocks_and_more`, `test_news_comparison_scores_what_the_protection_removed`, `test_report_cli_runs_the_news_comparison`. No real result: no OANDA history has been downloaded and no permitted point-in-time historical calendar is integrated |
 | I05 | Real Windows PC, Android 13 phone, Pine compile, owner-confirmed Exness specs stay PENDING OWNER | PENDING OWNER | Not observed yet. Checklist: [11-news-and-capital-guide.md](11-news-and-capital-guide.md) section জ and [10-owner-testing-guide.md](10-owner-testing-guide.md) |
 | I06 | Forward-paper period specified; live money not advertised as verified | PENDING OWNER | Period: at least 30 trading days on demo or paper, every READY journaled (docs/11 section জ, AT-26). README and STATUS say there is no validated trading edge |
+
+## Hybrid AI plan: research foundation (release 0.9.0)
+
+Tests T01–T12 of plan §12. Python tests are in `desktop/tests/research/` and run in `ci` and `research-ci` on Ubuntu
+and Windows. All data is synthetic: none of this shows a trading edge. Full mapping, plan acceptance criteria and
+tickets AI-001 to AI-007: [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md).
+
+| # | Requirement | Status | Evidence / what is missing |
+|---|---|---|---|
+| T01 | Snapshot hashing, replay determinism, atomic writes | CI | `test_csv_ingest_is_content_addressed_and_idempotent`, `test_tampered_artifact_is_detected_before_use`, `test_atomic_writes_leave_no_partial_files`, `test_same_inputs_same_run_id_and_hashes_and_verify` |
+| T02 | Closed bars, as-of news, future-data mutation, no lookahead | PARTIAL | `test_t02_future_bars_cannot_change_earlier_decisions`, `INCOMPLETE_BAR`/`FUTURE_BAR` rejection; news is not modelled by research (`NEWS_NOT_MODELLED`) until v1.1.0 |
+| T03 | Bid/ask, spread/slippage, stop-first, fees | PARTIAL | Baseline reuses the legacy replay and its tests (`test_strategy_backtest.py`); named cost models and spread sensitivity are v1.0.0 |
+| T04 | Per-pair Exness spec, Standard/Cent, min lot, hard cap, correlation | PARTIAL | Legacy C04–C07, AT-11, AT-15 unchanged; research uses `ASSUMED_EXNESS_STANDARD_CONTRACT` and hypothetical equity only |
+| T05 | Research cannot write the live DB, leak the token or produce READY | CI | `test_t05_research_cannot_write_the_live_registry`, `test_research_files_never_hold_the_token_or_pairing_code`, `test_a_research_decision_can_never_be_ready`, `test_outputs_are_research_only_never_ready_or_executable`, `test_static_isolation_rules_hold` |
+| T06 | Research off gives the exact 0.8.0 output | CI | Golden fingerprint `tests/research/fixtures/legacy-golden-0.8.0.json` (commit `33f9342`, written before any research code): `test_legacy_compatibility.py`; `test_research_is_off_by_default_and_creates_nothing` |
+| T07 | Worker crash, memory or overload does not affect the scanner | CI | `test_scanner_results_are_unchanged_while_a_research_worker_hangs`, `test_crash_is_recorded_and_the_lock_is_released`, `test_hang_is_stopped_by_the_timeout`, `test_memory_blow_up_hits_the_limit_not_the_pc` |
+| T08 | Dashboard loopback only, escaping, privacy, redacted export | CI | `test_key_cookie_host_and_methods`, `test_values_are_escaped_and_redacted`, `test_run_page_and_sanitised_exports`, `test_live_registry_view_is_read_only_and_hides_money`, `research dashboard --check` |
+| T09 | Walk-forward, embargo, holdout, model provenance | N/A | No ML in 0.9.0 (v1.2.0) |
+| T10 | Rollback to 0.8.0 behaviour without data loss | CI | `test_cli_end_to_end_then_t10_rollback`, `test_disable_always_works_even_with_a_broken_settings_file`, `scripts/research_smoke.py`, `scripts/windows_research_tests.ps1`; steps in [RELEASE_ROLLBACK.md](RELEASE_ROLLBACK.md) |
+| T11 | Android old payloads, signing, journal | N/A | Android unchanged; no APK published for 0.9.0 |
+| T12 | Dependency lock, vulnerability scan, forbidden imports, order API | PARTIAL | `test_t12_base_dependencies_unchanged_and_versions_consistent`, isolation and order-API scans; `pip-audit` informational in `research-ci`; no lock file (OPEN) |
+| R-OWNER | Real-data ingest, baseline run, parity and dashboard on the owner's PC | PENDING OWNER | [12-research-guide.md](12-research-guide.md) |

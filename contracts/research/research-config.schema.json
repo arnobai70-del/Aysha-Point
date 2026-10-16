@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arnobai70-del/Aysha-Point/contracts/research/research-config.schema.json",
+  "title": "AYESHA research configuration (research.config/1)",
+  "description": "Local file %AYESHA_HOME%/research/config.yaml, merged over safe defaults and validated before any research command runs. Research is OFF by default. The const values are safety locks for v0.9.x: research can never promote a strategy, hook into the live scanner, run ML, call an outside model, skip redaction or listen beyond 127.0.0.1. The live scanner never reads this file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "research"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "research.config/1"
+    },
+    "research": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "role",
+        "promotion_enabled",
+        "live_scanner_hooks_enabled",
+        "ml_enabled",
+        "workers",
+        "cpu_limit_percent",
+        "memory_limit_mb",
+        "job_timeout_seconds",
+        "data_source",
+        "account_scenario",
+        "allow_outbound_model_inference",
+        "report_redact_secrets",
+        "historical_news_policy",
+        "dashboard_bind",
+        "legacy_only_fallback",
+        "backup_keep",
+        "quality"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "false = legacy_only: research commands refuse to run"
+        },
+        "role": {
+          "const": "RESEARCH_ONLY"
+        },
+        "promotion_enabled": {
+          "const": false
+        },
+        "live_scanner_hooks_enabled": {
+          "const": false
+        },
+        "ml_enabled": {
+          "const": false
+        },
+        "workers": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1
+        },
+        "cpu_limit_percent": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 90,
+          "description": "advisory: the worker runs at lower OS priority; YAML alone cannot cap CPU"
+        },
+        "memory_limit_mb": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 8192,
+          "description": "address-space limit on Linux/macOS; not enforceable on Windows (timeout still applies)"
+        },
+        "job_timeout_seconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 21600
+        },
+        "data_source": {
+          "enum": [
+            "OANDA_V20_PRACTICE",
+            "CSV_IMPORT"
+          ]
+        },
+        "account_scenario": {
+          "const": "DEMO_ONLY"
+        },
+        "allow_outbound_model_inference": {
+          "const": false
+        },
+        "report_redact_secrets": {
+          "const": true
+        },
+        "historical_news_policy": {
+          "const": "REQUIRE_POINT_IN_TIME"
+        },
+        "dashboard_bind": {
+          "const": "127.0.0.1"
+        },
+        "legacy_only_fallback": {
+          "const": true
+        },
+        "backup_keep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        },
+        "quality": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "max_gap_bars",
+            "min_coverage_percent",
+            "stale_run_bars"
+          ],
+          "description": "Research-only acceptance policy for frozen datasets. It decides PASS vs DEGRADED; HIGH severity issues are always REJECTED. Defaults are unvalidated starting points, never tuned on results.",
+          "properties": {
+            "max_gap_bars": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "min_coverage_percent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "stale_run_bars": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 1000
+            }
+          }
+        }
+      }
+    }
+  }
+}

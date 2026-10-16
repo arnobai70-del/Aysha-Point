@@ -2,7 +2,10 @@ name: build-android
 on:
   push:
     branches: [main]
-    paths: ["android/**", "contracts/**", "desktop/ayesha/signing.py", ".github/workflows/build-android.yml"]
+    # Research-only changes (contracts/research/**, contracts/version.json) and edits of this file do not publish a
+    # new APK; start this workflow by hand (Run workflow) after changing it.
+    paths: ["android/**", "contracts/**", "!contracts/research/**", "!contracts/version.json",
+            "desktop/ayesha/signing.py"]
   workflow_dispatch:
 
 permissions:

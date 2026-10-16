@@ -55,3 +55,22 @@ see bank orders; "institutional" items are price-behavior hypotheses only.
 | B5 [Update capital] [Confirm open positions] [View risk history] | ✅ `ayesha capital`, `--positions`/`--no-positions`, `--history` | ✅ Update capital | no risk history screen on the phone yet |
 | P2 legacy 30/30 vs upgraded on the same candles, point-in-time, OOS, CIs, sample sizes | ✅ tooling | n/a | **NOT RUN on real data**: needs OANDA history and a permitted historical calendar |
 | P2 feasibility at $20/$25/$30/$100/$500/$1,000/$5,000 and adaptive account | ✅ tooling | n/a | hypothetical replay at assumed contract values, not a forecast |
+
+## Hybrid Advanced AI plan v1.0 (release 0.9.0: research foundation, off by default)
+
+| Plan item | Research plane | Live path | Notes |
+|---|---|---|---|
+| §2.4 isolation contract (off by default, scanner never imports research, separate worker, read-only legacy DB) | ✅ | unchanged | `check_research_isolation.py` in CI; golden fingerprint T06 |
+| §4 namespaced contracts (`research.*/1`) | ✅ 8 schemas | unchanged (spec 0.4.0, schema 1.1, wire 4) | candidates `executable: false`, never READY |
+| §5.1–5.2 frozen datasets with quality gate (PASS / DEGRADED / REJECTED) | ✅ OANDA practice or exported CSV | n/a | ASK high/low never invented; nothing filled in |
+| §5.3–5.4 research folder and `research.db` (migrations, audit, backup/restore) | ✅ | `ayesha.db` only read (mode=ro) | `feature_sets`, `model_registry`, `model_approvals` not created yet |
+| §6.1 Baseline A (SWEEP_MSS_FVG frozen) + parity with `ayesha backtest` | ✅ | n/a | real-data run **PENDING OWNER** |
+| §6.1 Control B, Experimental C/D, strategy registry | ❌ | n/a | v1.0.0 |
+| §6.3 cost model variants, spread sensitivity, portfolio simulation | ⚠️ legacy replay costs only | n/a | v1.0.0 |
+| §7 regimes, strategy × regime matrix, historical news | ❌ | n/a | v1.1.0; historical news **BLOCKED BY DATA** |
+| §8 ML lab | ❌ | n/a | v1.2.0, only with enough validated real data |
+| §9.1 Windows dashboard | ⚠️ Overview, Data, Runs, Live scanner (read-only), Diagnostics, Settings | n/a | no Strategy Lab / Replay chart / News context pages yet; GET only |
+| §9.2 Android research tab | ❌ | n/a | v1.3.0 |
+| §10 research CLI and config | ✅ `ayesha research …`, `research/config.yaml` | old commands unchanged | safety locks are schema constants |
+| §12 T01–T12 | ⚠️ T01, T05–T08, T10 CI; T02, T03, T04, T12 partial; T09, T11 n/a | | [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md) |
+

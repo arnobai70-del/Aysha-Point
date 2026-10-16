@@ -1,4 +1,4 @@
-# AYESHA FX: status (release 0.8.0, 2026-10-16)
+# AYESHA FX: status (release 0.9.0, 2026-10-16)
 
 **Implemented** = code exists. **Tested (CI)** = automated tests on GitHub Actions. **Verified** = seen working on the
 real platform (TradingView account, a real phone, the owner's broker, real market data). Nothing below is verified on
@@ -6,6 +6,10 @@ a real platform yet; those items are **PENDING OWNER DEVICE/AUTHORIZATION**.
 
 State: **demo/paper only, fail-closed. Not for real-money decisions.** No real-data backtest and no forward test has
 been run, so there is **no validated trading edge yet**. News direction (actual vs forecast) is not backtested at all.
+
+Release 0.9.0 adds the **research plane** (Hybrid AI plan, milestone v0.9.0), **off by default**. It never produces
+READY, never sends anything to the phone and places no orders; with research on or off, the advisory path below is
+byte-identical to 0.8.0 (golden fingerprint, plan T06). The phone app stays 0.5.0 (no new APK).
 
 | Part | Implemented | Tested (CI) | Verified on real platform |
 |---|---|---|---|
@@ -32,6 +36,19 @@ been run, so there is **no validated trading edge yet**. News direction (actual 
 | TradingView `alert()` → phone (Mode A) | yes | parser tests | **blocked on Basic**: no technical alerts on Basic |
 | Python ↔ Pine behavior parity | no | no | no |
 | Python ↔ Kotlin wire-format parity (incl. MTF, news notices, capital digest) | yes | shared fixtures + signature and digest vectors | n/a |
+
+### Research plane (0.9.0, off by default)
+
+| Part | Implemented | Tested (CI) | Verified on real platform |
+|---|---|---|---|
+| Legacy path unchanged with research present, on or off (signal ids, statuses, signed messages, replay trades, CLI, 65 protected files) | golden fingerprint from the 0.8.0 code | T06 `test_legacy_compatibility.py` (Ubuntu + Windows) | n/a |
+| Frozen datasets: OANDA practice download or exported CSV, raw kept, write-once manifest, content hashes, quality PASS / DEGRADED / REJECTED, nothing repaired | yes | `test_datasets.py` (fake HTTP, synthetic CSV) | **pending**: owner runs `research ingest --provider oanda` |
+| Separate research registry (`research.db`): migrations, no-READY constraint, hash-linked audit, crash reconciliation, verified backup and restore | yes | `test_registry.py` | **pending**: owner PC |
+| Baseline replay (`baseline-sweep-mss-fvg`, the unchanged live rules) with reproducible run id and `--verify`; parity with the legacy CSV path | yes | `test_baseline_parity.py` (synthetic), T01, T02 | **pending**: real data; no real result exists |
+| Separate limited worker process (Windows job object memory/CPU caps, kill-on-close; POSIX nice + memory limit), timeout, one writer | yes | `test_worker_isolation.py` incl. the scanner golden scenario while a worker hangs (T07) | **pending**: owner PC |
+| Read-only dashboard on 127.0.0.1 (key, Host check, GET only, no scripts, redacted, money hidden) | yes | `test_dashboard.py`, `research dashboard --check` (T08) | **pending**: owner PC |
+| `ayesha research` CLI, research doctor, `start-research.bat`, `backup-research.bat`, isolation check | yes | `test_rollback_isolation.py` (T05, T10), `research_smoke.py`, `windows_research_tests.ps1`, `check_research_isolation.py` | **pending**: owner PC |
+| Strategy lab, regimes, historical news comparison, ML, phone research tab (v1.0.0 to v1.3.0) | no | no | not started; historical news **BLOCKED BY DATA**, ML only with enough validated data |
 
 ## What an alert means
 - **READY** only comes from the PC scanner, signed with the owner's pairing code, fresh, same strategy hash, news
@@ -64,5 +81,9 @@ Step-by-step Bengali guides with expected results: [10-owner-testing-guide.md](1
    (AT-26, I06). Real money is not advised before this and a real-data report exist.
 6. Run `desktop\windows\make-signing-key.bat`, add its four `AYESHA_KEYSTORE_*`/`AYESHA_KEY_*` secrets, keep the key
    offline (AT-23). Back up the journal in the app before every uninstall.
+7. Optional, research (0.9.0): approve the merge of the research pull request; then, if you want, follow
+   [12-research-guide.md](12-research-guide.md) (enable, ingest from OANDA practice, baseline run, report) and send the
+   `report.md`. Research stays off unless you turn it on.
 
-See [VERIFICATION.md](VERIFICATION.md), [MASTER_CHECKLIST.md](MASTER_CHECKLIST.md) and [FEATURE_MATRIX.md](FEATURE_MATRIX.md).
+See [VERIFICATION.md](VERIFICATION.md), [MASTER_CHECKLIST.md](MASTER_CHECKLIST.md), [FEATURE_MATRIX.md](FEATURE_MATRIX.md)
+and, for research, [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md).
