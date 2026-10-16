@@ -1,0 +1,75 @@
+"""CI smoke test of the research command line, end to end, in a throwaway AYESHA_HOME (synthetic data only).
+
+    python scripts/research_smoke.py
+
+Runs `python -m ayesha.cli research ...` as separate processes, the way an owner would, and checks exit codes and
+key lines: off by default, enable, ingest, inspect, run, verify, report, parity, backup, restore, doctor, selftests,
+dashboard security check, disable (legacy_only) and refusal while off.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+DESKTOP = ROOT / "desktop"
+FAILED: list[str] = []
+
+
+def run(args: list[str], want: int = 0, expect: tuple[str, ...] = (), env: dict[str, str] | None = None) -> str:
+    p = subprocess.run([sys.executable, "-m", "ayesha.cli", "research", *args], cwd=DESKTOP, env=env,
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+    out = p.stdout + p.stderr
+    ok = p.returncode == want and all(e in out for e in expect)
+    print(f"{'PASS' if ok else 'FAIL'}  research {' '.join(args)}  (exit {p.returncode}, want {want})")
+    if not ok:
+        print(out)
+        FAILED.append(" ".join(args))
+    return out
+
+
+def main() -> int:
+    sys.path.insert(0, str(DESKTOP))
+    from tests.research import synth
+
+    with tempfile.TemporaryDirectory() as d:
+        env = dict(os.environ, AYESHA_HOME=str(Path(d) / "AyeshaFX"), PYTHONIOENCODING="utf-8")
+        env.pop("AYESHA_OANDA_TOKEN", None)
+        csv = synth.csv_dir(Path(d) / "csv", m15=3000, m5=6000, seed=4)
+        run(["status"], 0, ("OFF (legacy_only)", "No research data yet"), env)
+        run(["ingest", "--from-csv-dir", str(csv)], 2, ("Research is OFF",), env)
+        run(["enable"], 0, ("Research is ON",), env)
+        out = run(["ingest", "--from-csv-dir", str(csv), "--label", "CI synthetic"], 0, ("quality PASS",), env)
+        ds = re.search(r"Dataset (ds_[0-9a-f]{16})", out).group(1) if "Dataset ds_" in out else "ds_missing"
+        run(["inspect", ds], 0, ("coverage 100.0%",), env)
+        out = run(["run", "baseline-sweep-mss-fvg", "--dataset", ds, "--symbol", "EURUSD", "--split", "2025-03-20"],
+                  0, ("COMPLETED",), env)
+        rid = re.search(r"Run (run_[0-9a-f]{16})", out).group(1) if "Run run_" in out else "run_missing"
+        run(["run", "baseline-sweep-mss-fvg", "--dataset", ds, "--symbol", "EURUSD", "--split", "2025-03-20",
+             "--verify"], 0, ("VERIFIED",), env)
+        run(["report", rid], 0, ("RESEARCH ONLY", "Legacy replay report"), env)
+        run(["parity", "--dataset", ds, "--symbol", "EURUSD", "--mode", "m5confirm"], 0, ("Parity MATCHED",), env)
+        out = run(["backup"], 0, ("integrity ok",), env)
+        m = re.search(r"Backup: (\S+)", out)
+        run(["restore", m.group(1) if m else "missing", "--yes"], 0, ("Restored",), env)
+        run(["doctor", "--deep", "--selftest"], 0, ("All research checks passed",), env)
+        run(["selftest", "crash"], 1, ("CRASHED",), env)
+        run(["selftest", "ok"], 0, ("selftest ok: OK",), env)
+        run(["dashboard", "--check"], 0, ("Dashboard security self-test passed",), env)
+        run(["disable"], 0, ("Research is OFF",), env)
+        run(["run", "baseline-sweep-mss-fvg", "--dataset", ds, "--symbol", "EURUSD"], 2, ("Research is OFF",), env)
+        run(["datasets"], 0, (ds,), env)
+    if FAILED:
+        print(f"{len(FAILED)} research smoke step(s) failed")
+        return 1
+    print("Research smoke test passed (synthetic data; says nothing about a trading edge).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

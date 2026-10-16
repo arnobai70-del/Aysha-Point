@@ -1,0 +1,61 @@
+name: research-ci
+# Research plane (v0.9.0): research-only, OFF by default. Synthetic data only; no token, no network data feed.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (base dependencies only; research adds none)
+        working-directory: desktop
+        run: pip install -e ".[dev]"
+      - name: Research isolation (scanner cannot import research; research cannot reach phone, signing, token, live registry)
+        run: python scripts/check_research_isolation.py .
+      - name: Research acceptance tests (T01 T02 T05 T06 T07 T08 T10, synthetic data)
+        working-directory: desktop
+        run: pytest -q tests/research
+      - name: Research command line end to end
+        run: python scripts/research_smoke.py
+      - name: Windows research launchers (start-research.bat, backup-research.bat)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/windows_research_tests.ps1
+      - name: Safety scans still clean
+        run: |
+          python scripts/check_no_order_api.py .
+          python scripts/check_no_secrets.py .
+          python scripts/check_workflows.py .github/workflows
+
+  dependency-audit:
+    # T12 (informational): known vulnerabilities in the runtime dependencies. Reported, not a gate, because a new
+    # advisory in an unchanged dependency should not block an unrelated change; read the log.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: pip-audit of the runtime dependencies
+        working-directory: desktop
+        run: |
+          pip install pip-audit
+          pip install -e .
+          pip-audit --progress-spinner off --skip-editable
