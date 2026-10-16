@@ -82,17 +82,21 @@ def run_doctor(*, account_type: str = "Standard", oanda_env: str = "practice", p
         rows.append((False, "Exness contract", f"{what}: run `ayesha confirm-broker` "
                      "(those pairs stay blocked: BROKER_SPEC_UNVERIFIED)"))
 
-    from ayesha.capital import CapitalBook, CapitalError, check
+    from ayesha.capital import CapitalBook, CapitalError, check, warnings
 
     try:
-        snap = CapitalBook(home / "capital.json").latest()
+        book = CapitalBook(home / "capital.json")
+        hist = book.history()
+        snap = hist[-1] if hist else None
         c = check(snap, clock(), spec.get("capital", {}), account_type)
         if snap is None:
             rows.append((False, "Capital", "no Exness equity entered: run `ayesha capital` (READY blocked: "
                          "CAPITAL_UNVERIFIED)"))
         else:
+            warn = [w.split(":")[0] for w in warnings(hist, clock(), spec.get("capital", {}))]  # codes only, no amounts
             rows.append((c.ok, "Capital", f"v{snap.version} owner-entered {c.age_hours:.1f} h ago, "
-                         + ("OK" if c.ok else f"{', '.join(c.blockers)}: run `ayesha capital`")))
+                         + ("OK" if c.ok else f"{', '.join(c.blockers)}: run `ayesha capital`")
+                         + (f"; warning: {', '.join(warn)} (see `ayesha capital --history`)" if warn else "")))
     except CapitalError as e:
         rows.append((False, "Capital", f"{e}"))
 

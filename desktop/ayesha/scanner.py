@@ -311,6 +311,14 @@ class Scanner:
         except Exception as e:
             return None, [f"CAPITAL_UNREADABLE:{type(e).__name__}"]
 
+    def _capital_warnings(self, now: datetime) -> list[str]:
+        """Weekly drawdown / expiring confirmation warnings (spec B4). Codes only: no amounts."""
+        hist = getattr(self.capital, "history", None)
+        try:
+            return [w.split(":")[0] for w in capmod.warnings(hist(), now, self.capital_policy)] if hist else []
+        except Exception:
+            return []
+
     def _account_state(self, snap: capmod.CapitalSnapshot | None = None) -> AccountState:
         """Sizing inputs from the owner's capital snapshot (never from the data feed's balance)."""
         losses, realized = self.reg.day_stats(self.sessions.trading_day(self.clock()))
@@ -470,7 +478,7 @@ class Scanner:
         ev = na.event if na else None
         snap = cap.snapshot if cap else None
         return {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "signal_id": sig.signal_id,
             "strategy_version": self.spec["strategy_version"],
             "strategy_hash": self.spec["strategy_hash"],
@@ -505,6 +513,7 @@ class Scanner:
             "news_event": None if ev is None else {
                 "event_id": ev.event_id, "title": ev.title, "currency": ev.currency, "impact": ev.impact,
                 "tier": na.tier, "time_utc": ev.time.isoformat(), "state": ev.state},
+            "news_affected_currencies": sorted({e.currency for e, ph in na.events if ph != "CLEAR"}) if na else [],
             "news_provider": na.provider if na else "",
             "news_verified_at_utc": na.verified_at.isoformat() if na and na.verified_at else None,
             "news_next_lockout_utc": na.next_block_start.isoformat() if na and na.next_block_start else None,
@@ -515,6 +524,7 @@ class Scanner:
             "capital_verified_at_utc": snap.entered_at.isoformat() if snap else None,
             "capital_source": snap.source if snap else None,
             "capital_equity_usd": snap.equity_usd if snap else None,  # PC only: never sent to the relay
+            "capital_warnings": self._capital_warnings(self.clock()),  # information only, never a gate
             "risk_percent": self.cfg.risk_per_trade_percent,
             "risk_budget_usd": round(d.risk_budget_usd, 4),
             "nominal_budget_usd": round(d.nominal_budget_usd, 4),

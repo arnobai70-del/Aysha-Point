@@ -2,40 +2,382 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AYESHA canonical signal",
   "type": "object",
-  "required": ["schema_version", "signal_id", "strategy_version", "strategy_hash", "pair", "direction", "setup",
-               "event_time_utc", "status", "score_points", "score_is_probability", "rule_trace", "safe_to_alert_for_entry"],
+  "required": [
+    "schema_version",
+    "signal_id",
+    "strategy_version",
+    "strategy_hash",
+    "pair",
+    "direction",
+    "setup",
+    "event_time_utc",
+    "status",
+    "score_points",
+    "score_is_probability",
+    "rule_trace",
+    "safe_to_alert_for_entry"
+  ],
   "properties": {
-    "schema_version": {"const": "1.0"},
-    "signal_id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
-    "strategy_version": {"type": "string"},
-    "strategy_hash": {"type": "string"},
-    "pair": {"type": "string"},
-    "broker_symbol": {"type": ["string", "null"]},
-    "direction": {"enum": ["BUY", "SELL"]},
-    "setup": {"type": "string"},
-    "timeframe": {"type": "string"},
-    "event_time_utc": {"type": "string", "format": "date-time"},
-    "session": {"type": "array", "items": {"enum": ["SYDNEY", "TOKYO", "LONDON", "NEW_YORK"]}},
-    "status": {"enum": ["WATCH", "READY", "NOTIFIED", "NO_TRADE", "INVALIDATED", "EXPIRED", "MISSED", "CANCELED",
-                        "USER_MARKED_PLACED", "USER_MARKED_CLOSED", "DATA_STALE",
-                        "ENTRY_TOUCHED", "OBSERVED_TP", "OBSERVED_SL"]},
-    "grade": {"enum": ["A_PLUS", "WATCH", "IGNORE"]},
-    "entry": {"type": ["number", "null"]},
-    "stop_loss": {"type": ["number", "null"]},
-    "take_profits": {"type": "array", "items": {"type": "number"}},
-    "broker_prices": {"type": ["object", "null"]},
-    "safe_lot": {"type": ["number", "null"]},
-    "risk_usd": {"type": ["number", "null"]},
-    "net_rr": {"type": ["number", "null"]},
-    "spread_pips": {"type": ["number", "null"]},
-    "score_points": {"type": "integer", "minimum": 0, "maximum": 100},
-    "score_breakdown": {"type": "object"},
-    "score_is_probability": {"const": false},
-    "news_verification": {"enum": ["CLEAR", "BLOCKED", "UNKNOWN"]},
-    "chart_parity": {"enum": ["MATCHED", "PARTIAL", "UNVERIFIED", "MISMATCH"]},
-    "blockers": {"type": "array", "items": {"type": "string"}},
-    "rule_trace": {"type": "array", "items": {"type": "string"}},
-    "expires_at_utc": {"type": ["string", "null"]},
-    "safe_to_alert_for_entry": {"type": "boolean"}
-  }
+    "schema_version": {
+      "enum": [
+        "1.0",
+        "1.1"
+      ]
+    },
+    "signal_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "strategy_version": {
+      "type": "string"
+    },
+    "strategy_hash": {
+      "type": "string"
+    },
+    "pair": {
+      "type": "string"
+    },
+    "broker_symbol": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "direction": {
+      "enum": [
+        "BUY",
+        "SELL"
+      ]
+    },
+    "setup": {
+      "type": "string"
+    },
+    "timeframe": {
+      "type": "string"
+    },
+    "event_time_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "session": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "SYDNEY",
+          "TOKYO",
+          "LONDON",
+          "NEW_YORK"
+        ]
+      }
+    },
+    "status": {
+      "enum": [
+        "CANCELED",
+        "DATA_STALE",
+        "ENTRY_TOUCHED",
+        "EXPIRED",
+        "INVALIDATED",
+        "MISSED",
+        "NOTIFIED",
+        "NO_TRADE",
+        "OBSERVED_SL",
+        "OBSERVED_TP",
+        "READY",
+        "USER_MARKED_CLOSED",
+        "USER_MARKED_PLACED",
+        "WATCH",
+        "WATCH_M5"
+      ]
+    },
+    "grade": {
+      "enum": [
+        "A_PLUS",
+        "WATCH",
+        "IGNORE"
+      ]
+    },
+    "entry": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "stop_loss": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "take_profits": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      }
+    },
+    "broker_prices": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "safe_lot": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "risk_usd": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "net_rr": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "spread_pips": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "score_points": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "score_breakdown": {
+      "type": "object"
+    },
+    "score_is_probability": {
+      "const": false
+    },
+    "news_verification": {
+      "enum": [
+        "CLEAR",
+        "BLOCKED",
+        "UNKNOWN"
+      ]
+    },
+    "chart_parity": {
+      "enum": [
+        "MATCHED",
+        "PARTIAL",
+        "UNVERIFIED",
+        "MISMATCH"
+      ]
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "rule_trace": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expires_at_utc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "safe_to_alert_for_entry": {
+      "type": "boolean"
+    },
+    "mtf": {
+      "type": "object",
+      "description": "one combined multi-timeframe explanation"
+    },
+    "entry_type": {
+      "enum": [
+        "LIMIT_AT_FVG",
+        "MARKET_AFTER_M5_CONFIRMATION"
+      ]
+    },
+    "quote_time_utc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "news_phase": {
+      "enum": [
+        "UPCOMING",
+        "PRE_EVENT_LOCKOUT",
+        "EVENT_LIVE",
+        "POST_EVENT_COOLDOWN",
+        "REACTION_WATCH",
+        "CLEAR",
+        "NEWS_UNVERIFIED"
+      ]
+    },
+    "news_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "news_event": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string"
+        },
+        "impact": {
+          "type": "string"
+        },
+        "tier": {
+          "type": "string"
+        },
+        "time_utc": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "SCHEDULED",
+            "RESCHEDULED",
+            "CANCELLED_OR_MOVED",
+            "CORRECTED",
+            "CONFLICT"
+          ]
+        }
+      }
+    },
+    "news_affected_currencies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "news_provider": {
+      "type": "string"
+    },
+    "news_verified_at_utc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "news_next_lockout_utc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "news_scenario": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "conditional scenarios; is_prediction false, probability null"
+    },
+    "news_reaction": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "post-release explanation; is_permission always false"
+    },
+    "capital_status": {
+      "type": "string",
+      "description": "OK or the first capital blocker, e.g. CAPITAL_STALE"
+    },
+    "capital_snapshot_version": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "capital_verified_at_utc": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capital_source": {
+      "enum": [
+        "OWNER_ENTERED",
+        "MT5_READ_ONLY",
+        null
+      ]
+    },
+    "capital_equity_usd": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "PC registry only; never sent to the relay"
+    },
+    "capital_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "codes only; never a gate"
+    },
+    "risk_percent": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1.0
+    },
+    "risk_budget_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "nominal_budget_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "budget_limited_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "lot_status": {
+      "type": "string"
+    },
+    "margin_required_usd": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min_lot_loss_usd": {
+      "type": "number"
+    },
+    "min_lot_loss_percent": {
+      "type": "number"
+    },
+    "liquidity_source": {
+      "type": "string"
+    },
+    "target_name": {
+      "type": "string"
+    },
+    "data_source": {
+      "type": "string"
+    },
+    "contract_spec_source": {
+      "type": "string",
+      "description": "OWNER_CONFIRMED:<symbol> or MT5; ASSUMED_* never gives READY"
+    }
+  },
+  "description": "PC signal record (registry payload and archive). 1.1 adds the News Intelligence and Adaptive Capital fields; every 1.0 field is unchanged. The phone never receives this JSON: it gets the signed wire format (contracts/fixtures), which never carries the equity amount. Mapping to the News spec protocol: news_status = news_verification, news_event_id = news_event.event_id, impact = news_event.impact, affected_currencies = news_affected_currencies, provider = news_provider, verified_at_utc = news_verified_at_utc, safety_reasons = news_reasons + blockers, post_reaction_state = news_reaction.state, broker_spec_source = contract_spec_source."
 }

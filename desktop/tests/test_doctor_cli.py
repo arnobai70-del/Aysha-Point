@@ -43,6 +43,20 @@ def test_doctor_reports_every_missing_piece(tmp_path):
     assert "OANDA prices" not in _names(rows, True)
 
 
+def test_doctor_shows_capital_warnings_as_codes_without_amounts(tmp_path):
+    from ayesha.capital import CapitalBook
+
+    t = [NOW - timedelta(days=3)]
+    book = CapitalBook(tmp_path / "capital.json", clock=lambda: t[0])
+    book.record(250, positions=[])
+    t[0] = NOW - timedelta(hours=1)
+    book.record(231.5, positions=[])  # 7.4 % below the week's high
+    rows = run_doctor(env={}, home=tmp_path, make_calendar=lambda p: None, publish=False, clock=lambda: NOW, store=False)
+    cap = next(d for o, n, d in rows if n == "Capital")
+    assert "warning: WEEKLY_DRAWDOWN_WARNING" in cap and "--history" in cap
+    assert "231" not in cap and "250" not in cap and "7.4" not in cap, "doctor never prints amounts"
+
+
 def test_doctor_all_green_with_fakes(tmp_path):
     from ayesha.broker import save_confirmed, load_assumed
     from ayesha.delivery.push import new_pairing_code

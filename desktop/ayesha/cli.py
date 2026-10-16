@@ -366,29 +366,82 @@ def _capital_prompt(book, account_type: str) -> int:
     return 0
 
 
+def _print_capital_history(book, policy: dict, days: int, db: str | None) -> int:
+    """Risk history: capital snapshots, the cash-flow-adjusted 7-day change and the owner's own journal.
+    Everything stays on this PC; nothing here is a forecast."""
+    from ayesha.capital import CapitalError, cash_flow_usd, trading_change, warnings
+
+    try:
+        hist = book.history()
+    except CapitalError as e:
+        print(f"CONFIG ERROR: {e}")
+        return EXIT_CONFIG
+    if not hist:
+        print("No capital snapshot yet: run `ayesha capital`.")
+        return EXIT_CONFIG
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    shown = [s for s in hist if s.entered_at >= since] or hist[-1:]
+    print(f"Capital history, last {days} days (owner-entered from the Exness app; never sent anywhere):")
+    print("  v    entered (UTC)     reason      equity          cash flow   open trades  positions confirmed")
+    for s in shown:
+        cf = cash_flow_usd(s)
+        pc = f"{s.positions_confirmed_at:%Y-%m-%d %H:%M}" if s.positions_confirmed_at else "not confirmed"
+        print(f"  {s.version:<4} {s.entered_at:%Y-%m-%d %H:%M}  {s.reason:<11} {s.equity:>10.2f} {s.currency}  "
+              f"{(f'{cf:+.2f} USD' if cf else '-'):>11}  {len(s.open_positions):>11}  {pc}")
+    ch = trading_change(hist, now, 7.0)
+    if ch:
+        pct = "n/a" if ch["trading_change_percent"] is None else f"{ch['trading_change_percent']:+.2f}%"
+        print(f"\nLast 7 days, deposits/withdrawals excluded: {ch['start_equity_usd']:.2f} -> {ch['latest_equity_usd']:.2f} USD "
+              f"(cash flow {ch['net_cash_flow_usd']:+.2f}), trading change {ch['trading_change_usd']:+.2f} USD ({pct}), "
+              f"{ch['drawdown_percent'] or 0:.2f}% below the week's high")
+    if db and Path(db).exists():
+        from ayesha.storage.db import Registry
+
+        rows = Registry(db).closed_since(since)
+        pnl = [r["pnl_usd"] for r in rows if r["pnl_usd"] is not None]
+        print(f"Your journal (`ayesha mark`), last {days} days: {len(rows)} closed, {sum(1 for x in pnl if x < 0)} losses, "
+              f"realized {sum(pnl):+.2f} USD. Journal results are your own marks, never backtest numbers.")
+    for w in warnings(hist, now, policy):
+        print(f"WARNING {w}")
+    print("Hard limits stay on whatever this shows: 2 losses or 2% loss per day, 1% open risk, 1% per trade at most.")
+    return 0
+
+
 def cmd_capital(a) -> int:
     """Update or show the owner's Exness capital snapshot (the only capital AYESHA sizes from)."""
-    from ayesha.capital import CapitalBook, CapitalError, check
+    from ayesha.capital import CapitalBook, CapitalError, check, warnings
 
     book = CapitalBook(Path(a.file) if a.file else None)
+    policy = load_spec(a.spec).get("capital", {})
+    if a.history:
+        return _print_capital_history(book, policy, a.days, a.db or str(_default_db()))
     if a.show:
         try:
-            snap = book.latest()
+            hist = book.history()
         except CapitalError as e:
             print(f"CONFIG ERROR: {e}")
             return EXIT_CONFIG
-        c = check(snap, datetime.now(timezone.utc), load_spec(a.spec).get("capital", {}), a.account_type)
+        snap = hist[-1] if hist else None
+        c = check(snap, datetime.now(timezone.utc), policy, a.account_type)
         if snap is None:
             print("No capital snapshot yet: run `ayesha capital`.")
             return EXIT_CONFIG
         print(f"v{snap.version} {snap.equity:g} {snap.currency} entered {snap.entered_at:%Y-%m-%d %H:%M} UTC "
               f"({snap.reason}); open trades {len(snap.open_positions)}; status {c.label}")
+        for w in warnings(hist, datetime.now(timezone.utc), policy):
+            print(f"WARNING {w}")
         return 0 if c.ok else 1
     if a.session_start:
         interactive = sys.stdin.isatty() and not os.environ.get("AYESHA_NONINTERACTIVE")
         if not interactive:
             return 0
         print("\n=== Capital check for this session (Exness app -> Accounts) ===")
+        try:
+            for w in warnings(book.history(), datetime.now(timezone.utc), policy):
+                print(f"WARNING {w}")
+        except CapitalError:
+            pass  # the prompt below explains and starts a new history
         return _capital_prompt(book, a.account_type)
     if a.equity is None:
         return _capital_prompt(book, a.account_type)
@@ -549,10 +602,14 @@ def cmd_doctor(a) -> int:  # pragma: no cover - network; logic tested via run_do
     return 0 if not bad else 1
 
 
-def _db_path(a) -> str:
+def _default_db() -> Path:
     from ayesha.paths import home
 
-    p = Path(a.db or home() / "ayesha.db")
+    return home() / "ayesha.db"
+
+
+def _db_path(a) -> str:
+    p = Path(a.db or _default_db())
     p.parent.mkdir(parents=True, exist_ok=True)
     return str(p)
 
@@ -924,7 +981,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-positions", action="store_true", help="confirm there are no open trades")
     s.add_argument("--free-margin", help="free margin shown in Exness (needed with open trades)")
     s.add_argument("--show", action="store_true", help="print the latest snapshot and whether it is valid")
+    s.add_argument("--history", action="store_true",
+                   help="risk history: capital snapshots, 7-day change without deposits, your journal, warnings")
+    s.add_argument("--days", type=int, default=30, help="with --history: how many days to list (default 30)")
     s.add_argument("--session-start", action="store_true", help="prompt once if a person is at the keyboard")
+    s.add_argument("--db", help=argparse.SUPPRESS)
     s.add_argument("--file", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_capital)
 

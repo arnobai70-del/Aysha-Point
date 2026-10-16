@@ -163,6 +163,64 @@ def check(snap: CapitalSnapshot | None, now: datetime, policy: dict[str, Any], a
     return CapitalCheck(not b, b, snap, round(age, 2), max_age, pos_ok)
 
 
+def cash_flow_usd(s: CapitalSnapshot) -> float:
+    """Deposit (+) or withdrawal (-) recorded with this snapshot, in USD. Never trading P&L."""
+    k = 0.01 if s.currency == "USC" else 1.0
+    return k * (s.amount if s.reason == "DEPOSIT" else -s.amount if s.reason == "WITHDRAWAL" else 0.0)
+
+
+def trading_change(history: list[CapitalSnapshot], now: datetime, days: float = 7.0) -> dict[str, Any] | None:
+    """Equity change over the last `days` from the owner's snapshots with deposits and withdrawals
+    taken out (spec B4, C08), for the latest snapshot's account type. Information for warnings only.
+
+    Adjusted equity = equity minus the net cash flow since the window start, so a $500 deposit is
+    neither growth nor a cushion; `drawdown_percent` is how far the adjusted equity now sits below its
+    highest value in the window."""
+    hist = [x for x in history if x.entered_at <= now]
+    if not hist:
+        return None
+    hist = [x for x in hist if x.account_type == hist[-1].account_type]
+    since = now - timedelta(days=days)
+    start = max([k for k, x in enumerate(hist) if x.entered_at <= since], default=0)
+    win = hist[start:]
+    flows, adj = 0.0, []
+    for k, x in enumerate(win):
+        if k:
+            flows += cash_flow_usd(x)
+        adj.append(x.equity_usd - flows)
+    peak = max(adj)
+    return {"days": days, "from_utc": win[0].entered_at.isoformat(), "snapshots": len(win),
+            "start_equity_usd": round(win[0].equity_usd, 2), "latest_equity_usd": round(win[-1].equity_usd, 2),
+            "net_cash_flow_usd": round(flows, 2), "trading_change_usd": round(adj[-1] - adj[0], 2),
+            "trading_change_percent": round((adj[-1] - adj[0]) / adj[0] * 100, 2) if adj[0] > 0 else None,
+            "drawdown_percent": round((peak - adj[-1]) / peak * 100, 2) if peak > 0 else None}
+
+
+def warnings(history: list[CapitalSnapshot], now: datetime, policy: dict[str, Any]) -> list[str]:
+    """Warnings only (spec B4): they never block a trade or loosen a hard gate; the daily loss,
+    two-loss and open-risk gates stay as they are. Each one names what to do."""
+    out: list[str] = []
+    if not history:
+        return out
+    snap = history[-1]
+    soon = float(policy.get("freshness_warning_hours", 2))
+    c = check(snap, now, policy, snap.account_type)
+    if c.age_hours is not None and c.max_age_hours is not None and 0 < c.max_age_hours - c.age_hours <= soon:
+        out.append(f"CAPITAL_EXPIRES_SOON: confirm your Exness equity within {c.max_age_hours - c.age_hours:.1f} h "
+                   "(`ayesha capital`)")
+    if snap.positions_confirmed_at is not None:
+        left = float(policy.get("positions_max_age_hours", 12)) - (now - snap.positions_confirmed_at).total_seconds() / 3600
+        if 0 < left <= soon:
+            out.append(f"POSITIONS_CONFIRMATION_EXPIRES_SOON: confirm open trades within {left:.1f} h")
+    limit = policy.get("weekly_drawdown_warning_percent")
+    ch = trading_change(history, now, 7.0)
+    if limit is not None and ch and ch["drawdown_percent"] is not None and ch["drawdown_percent"] >= float(limit):
+        out.append(f"WEEKLY_DRAWDOWN_WARNING: equity is {ch['drawdown_percent']:.1f}% below this week's high "
+                   "(deposits/withdrawals excluded). Review your journal before the next trade; risk per trade "
+                   "does not change and losses are never chased")
+    return out
+
+
 def digest(pairing_code: str, equity_usd: float) -> str:
     """Keyed fingerprint of the equity in cents, so the phone can compare without the amount being sent.
     Same algorithm in android core/Capital.kt (shared test vector)."""
@@ -234,13 +292,7 @@ class CapitalBook:
 
     def cash_flows_usd(self, since: datetime | None = None) -> float:
         """Net deposits minus withdrawals in USD. Kept apart from trading P&L (spec B4, C08)."""
-        tot = 0.0
-        for s in self._read():
-            if since and s.entered_at < since:
-                continue
-            k = 0.01 if s.currency == "USC" else 1.0
-            tot += k * (s.amount if s.reason == "DEPOSIT" else -s.amount if s.reason == "WITHDRAWAL" else 0.0)
-        return tot
+        return sum(cash_flow_usd(s) for s in self._read() if not (since and s.entered_at < since))
 
 
 def static(snapshot: CapitalSnapshot):

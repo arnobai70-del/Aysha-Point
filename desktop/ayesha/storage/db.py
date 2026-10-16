@@ -188,6 +188,11 @@ class Registry:
         losses = [r["pnl_usd"] for r in rows if r["pnl_usd"] < 0]
         return len(losses), -sum(losses)
 
+    def closed_since(self, since_utc: datetime) -> list[sqlite3.Row]:
+        """The owner's own CLOSED journal marks since a time (risk history; never backtest data)."""
+        return self.db.execute("SELECT signal_id, at_utc, pnl_usd FROM journal WHERE action='CLOSED' AND at_utc >= ? "
+                               "ORDER BY at_utc", (since_utc.isoformat(timespec="seconds"),)).fetchall()
+
     def open_positions(self) -> list[tuple[str, str]]:
         rows = self.db.execute("SELECT symbol, direction FROM signals WHERE status='USER_MARKED_PLACED'").fetchall()
         return [(r["symbol"], r["direction"]) for r in rows]

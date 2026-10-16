@@ -109,6 +109,9 @@ capital:   # Exness equity typed by the owner (no broker API); OANDA's practice 
   large_change_percent: 25
   positions_max_age_hours: 12   # open trades / free margin confirmed once per session
   news_leverage_cap: 200        # margin is checked at no more than 1:200 (Exness limits leverage around news)
+  # warnings only (News spec B4): they never block or loosen a hard gate
+  weekly_drawdown_warning_percent: 4.0  # equity this far below its 7-day high, deposits/withdrawals excluded
+  freshness_warning_hours: 2            # capital / open-trades confirmation expires within this
 
 scoring:
   a_plus: 85

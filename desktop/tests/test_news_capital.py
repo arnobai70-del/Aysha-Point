@@ -641,6 +641,70 @@ def test_c08_deposits_are_not_trading_pnl(tmp_path):
         book.record(100, reason="DEPOSIT", amount=0)
 
 
+def _book_over_days(tmp_path, steps):
+    """steps: (days after start, equity, reason, amount). Returns the book and the time of the last step."""
+    t = [E - timedelta(days=6)]
+    book = capmod.CapitalBook(tmp_path / "c.json", clock=lambda: t[0])
+    for days, eq, reason, amount in steps:
+        t[0] = E - timedelta(days=6) + timedelta(days=days)
+        book.record(eq, reason=reason, amount=amount)
+    return book, t[0]
+
+
+def test_b4_weekly_drawdown_excludes_cash_flows_and_is_only_a_warning(spec, tmp_path):
+    book, now = _book_over_days(tmp_path, [(0, 25, "UPDATE", 0), (2, 24, "UPDATE", 0),
+                                           (3, 524, "DEPOSIT", 500), (5, 520, "UPDATE", 0)])
+    ch = capmod.trading_change(book.history(), now)
+    assert ch["net_cash_flow_usd"] == 500 and ch["trading_change_usd"] == -5
+    assert ch["drawdown_percent"] == pytest.approx(20.0)  # (25 - 20) / 25, not "+2,000 %" growth
+    policy = spec["capital"]
+    w = capmod.warnings(book.history(), now, policy)
+    assert any(x.startswith("WEEKLY_DRAWDOWN_WARNING") for x in w)
+    c = capmod.check(book.latest(), now, policy, "Standard")
+    assert c.ok, "a warning never blocks, and never loosens, a hard gate"
+    # a withdrawal is not a loss either
+    book2, now2 = _book_over_days(tmp_path / "w", [(0, 500, "UPDATE", 0), (4, 200, "WITHDRAWAL", 300)])
+    ch2 = capmod.trading_change(book2.history(), now2)
+    assert ch2["trading_change_usd"] == 0 and ch2["drawdown_percent"] == 0
+    assert not capmod.warnings(book2.history(), now2, policy)
+    # the window is 7 days: an older fall no longer warns
+    assert not any(x.startswith("WEEKLY") for x in capmod.warnings(book.history(), now + timedelta(days=9), policy))
+
+
+def test_b4_confirmation_expiry_warning_before_it_goes_stale(spec, tmp_path):
+    book = capmod.CapitalBook(tmp_path / "c.json", clock=lambda: E)
+    book.record(100, positions=[])
+    policy = spec["capital"]
+    assert not capmod.warnings(book.history(), E + timedelta(hours=9), policy)
+    w = capmod.warnings(book.history(), E + timedelta(hours=10.5), policy)
+    assert w and w[0].startswith("POSITIONS_CONFIRMATION_EXPIRES_SOON")
+    w = capmod.warnings(book.history(), E + timedelta(hours=22.5), policy)
+    assert any(x.startswith("CAPITAL_EXPIRES_SOON") for x in w)
+    late = E + timedelta(hours=25)
+    assert not any("EXPIRES_SOON" in x for x in capmod.warnings(book.history(), late, policy))
+    assert "CAPITAL_STALE" in capmod.check(book.latest(), late, policy, "Standard").blockers
+
+
+def test_b5_capital_history_shows_snapshots_change_journal_and_warnings(spec, tmp_path, capsys, monkeypatch):
+    from ayesha import cli
+
+    t = [datetime.now(timezone.utc) - timedelta(days=5)]
+    book = capmod.CapitalBook(tmp_path / "capital.json", clock=lambda: t[0])
+    book.record(25)
+    t[0] += timedelta(days=2)
+    book.record(524, reason="DEPOSIT", amount=500)
+    t[0] += timedelta(days=2)
+    book.record(500)
+    reg = Registry(tmp_path / "ayesha.db")
+    reg.journal("CLOSED", None, -1.25)
+    rc = cli.main(["capital", "--history", "--file", str(tmp_path / "capital.json"), "--db", str(tmp_path / "ayesha.db")])
+    out = capsys.readouterr().out
+    assert rc == 0 and "DEPOSIT" in out and "+500.00 USD" in out and "INITIAL" in out
+    assert "deposits/withdrawals excluded: 25.00 -> 500.00 USD (cash flow +500.00)" in out
+    assert "1 closed, 1 losses, realized -1.25 USD" in out and "never backtest numbers" in out
+    assert "WARNING WEEKLY_DRAWDOWN_WARNING" in out and "2 losses or 2% loss per day" in out
+
+
 def test_c09_capital_updates_reach_the_scanner_and_never_the_relay(spec, tmp_path):
     t0 = E - timedelta(hours=3)
     book = capmod.CapitalBook(tmp_path / "capital.json", clock=lambda: t0)
@@ -671,6 +735,20 @@ def test_c10_news_and_scores_never_bypass_capital_or_daily_rules(spec, tmp_path)
 
 # --- I02 integration: event -> block -> stabilisation -> risk -> signed phone explanation ------------------
 
+def _assert_matches_schema(rec):
+    """The PC record and contracts/signal.schema.json stay aligned (no silent protocol change)."""
+    from pathlib import Path
+
+    schema = json.loads((Path(__file__).resolve().parents[2] / "contracts" / "signal.schema.json").read_text())
+    props = schema["properties"]
+    assert set(schema["required"]) <= set(rec), set(schema["required"]) - set(rec)
+    assert set(rec) <= set(props), f"fields missing from the schema: {sorted(set(rec) - set(props))}"
+    assert rec["schema_version"] in props["schema_version"]["enum"]
+    for k, v in rec.items():
+        if "enum" in props[k] and not isinstance(v, (list, dict)):
+            assert v in props[k]["enum"], (k, v)
+
+
 def test_i02_event_block_stabilise_then_signed_ready(spec, tmp_path):
     cpi = ev("CPI m/m", forecast="0.3%", previous="0.2%")
     start = E - timedelta(minutes=40)
@@ -679,12 +757,15 @@ def test_i02_event_block_stabilise_then_signed_ready(spec, tmp_path):
     rec = sc._event(Event("SETUP", sig), bar)
     assert rec["status"] == "NO_TRADE" and rec["news_phase"] == "PRE_EVENT_LOCKOUT"
     assert rec["news_event"]["title"] == "CPI m/m" and rec["news_scenario"]["direction"] == "CONDITIONAL"
+    assert rec["news_affected_currencies"] == ["USD"] and rec["capital_warnings"] == []
+    _assert_matches_schema(rec)
     later = E + timedelta(minutes=45, seconds=10)
     sc.clock_t[0] = later
     sig2 = replace(sig, signal_id="cafe000000000003", bar_close_utc=later - timedelta(seconds=5))
     rec2 = sc._event(Event("SETUP", sig2), bar)
     assert rec2["status"] == "READY", rec2["blockers"]
     assert rec2["news_phase"] == "CLEAR" and rec2["news_reaction"]["is_permission"] is False
+    _assert_matches_schema(rec2)
     line = [m for m in bus.msgs if m.startswith("AYESHA BUY") and " ST=READY " in m][0].splitlines()[0]
     assert " WF=4 " in line and " NP=CLEAR " in line and " SPEC=OWNER " in line and " CAPH=" in line
     # no order is ever sent: scripts/check_no_order_api.py (test_repo_has_no_order_api) scans every source file
