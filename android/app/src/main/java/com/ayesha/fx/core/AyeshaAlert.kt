@@ -44,12 +44,33 @@ data class AyeshaAlert(
     val signatureOk: Boolean = false,
     /** PC multi-timeframe explanation (MTF=), see [Mtf]. Empty for TradingView alerts. */
     val mtf: Map<String, String> = emptyMap(),
+    /** PC wire format (WF=); 0 = a PC older than 0.8.0. */
+    val wireFormat: Int = 0,
+    /** PC news phase (NP=): CLEAR, UPCOMING, PRE_EVENT_LOCKOUT, ..., NEWS_UNVERIFIED. "" = not sent. */
+    val newsPhase: String = "",
+    /** Event that decided the news phase (NE=, NT=, NI=); empty when none. */
+    val newsEventId: String = "",
+    val newsTimeMs: Long? = null,
+    val newsImpact: String = "",
+    /** When the PC last fetched its news calendar (NV=). */
+    val newsVerifiedMs: Long? = null,
+    /** PC capital snapshot version (CAPV=), its time (CAPT=) and keyed digest (CAPH=). Never the amount. */
+    val capitalVersion: Int = 0,
+    val capitalTimeMs: Long? = null,
+    val capitalDigest: String = "",
+    /** Risk percent the PC sized with (RISKP=). */
+    val riskPercent: Double? = null,
+    /** Where the PC's contract values came from (SPEC=): OWNER, MT5 or ASSUMED. */
+    val specKind: String = "",
 ) {
     companion object {
         const val CHART_CANDIDATE = "CHART_CANDIDATE"
     }
 
     val isPc: Boolean get() = origin == "PC"
+
+    /** The PC cancelled this setup before entry (signed NO_TRADE with INVALIDATED). */
+    val isInvalidated: Boolean get() = isPc && status == "NO_TRADE" && "INVALIDATED" in blockers
 
     val isBuy: Boolean get() = direction == "BUY"
 
@@ -161,6 +182,17 @@ object AlertParser {
             blockers = keys["BLK"]?.split(',')?.filter { it.isNotBlank() && it != "NONE" } ?: emptyList(),
             signatureOk = signatureOk && origin == "PC",
             mtf = Mtf.parse(keys["MTF"]),
+            wireFormat = keys["WF"]?.toIntOrNull()?.takeIf { it in 1..99 } ?: 0,
+            newsPhase = keys["NP"] ?: "",
+            newsEventId = keys["NE"]?.takeIf { it != "NONE" && it != "NA" } ?: "",
+            newsTimeMs = keys["NT"]?.toLongOrNull()?.takeIf { it > 0 },
+            newsImpact = keys["NI"]?.takeIf { it != "NONE" && it != "NA" } ?: "",
+            newsVerifiedMs = keys["NV"]?.toLongOrNull()?.takeIf { it > 0 },
+            capitalVersion = keys["CAPV"]?.toIntOrNull()?.takeIf { it >= 0 } ?: 0,
+            capitalTimeMs = keys["CAPT"]?.toLongOrNull()?.takeIf { it > 0 },
+            capitalDigest = keys["CAPH"]?.takeIf { Regex("[0-9a-f]{16}").matches(it) } ?: "",
+            riskPercent = num(keys["RISKP"])?.takeIf { it > 0 },
+            specKind = keys["SPEC"] ?: "",
         )
     }
 

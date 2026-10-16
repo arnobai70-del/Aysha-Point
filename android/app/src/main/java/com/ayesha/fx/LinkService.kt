@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import com.ayesha.fx.core.Heartbeat
 import com.ayesha.fx.core.LinkHealth
+import com.ayesha.fx.core.News
 import com.ayesha.fx.core.Signer
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -51,6 +52,19 @@ class LinkService : Service() {
                 prefs.reject("PC বার্তার সই মেলেনি (অন্য pairing code বা নকল বার্তা)")
                 return
             }
+            if (body.startsWith("AYESHA NEWS")) {
+                // News Watch: information and protection status, never a trade signal.
+                val n = News.parse(body, receivedAtMs)
+                if (n == null) {
+                    prefs.reject("নিউজ বার্তা পড়া যায়নি বা সময় ভুল")
+                    return
+                }
+                // stored once per event and phase; a catch-up replay of an old window is stored silently
+                if (NewsStore(context).add(n) && prefs.newsNotify && News.worthNotifying(n, receivedAtMs)) {
+                    Notifier.showNews(context, n)
+                }
+                return
+            }
             val hb = Heartbeat.parse(body)
             if (hb != null) {
                 // Catch-up replays old heartbeats; only a newer one may refresh the PC status.
@@ -59,6 +73,7 @@ class LinkService : Service() {
                 prefs.hbRecvMs = receivedAtMs
                 prefs.hbState = hb.state
                 prefs.hbVersion = hb.version
+                prefs.hbCapital = hb.capital
                 return
             }
             AlertListener.handle(context, body, receivedAtMs, signatureOk = true)

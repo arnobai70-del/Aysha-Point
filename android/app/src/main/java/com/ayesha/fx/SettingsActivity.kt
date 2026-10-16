@@ -3,16 +3,22 @@ package com.ayesha.fx
 import android.app.Activity
 import android.os.Bundle
 import android.text.InputType
+import android.text.format.DateFormat
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.Toast
+import com.ayesha.fx.core.Capital
 import com.ayesha.fx.core.SettingsCheck
 import com.ayesha.fx.core.Signer
 import com.ayesha.fx.core.StrategyInfo
+import java.util.Date
 
-/** Capital & risk settings (spec O6). Risk is capped at 1% per trade. */
+/**
+ * Capital & risk settings (spec O6; News spec module B). Risk is capped at 1% per trade. The equity is the
+ * owner's current Exness equity, a variable: it is confirmed with a time and goes stale after a day.
+ */
 class SettingsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,7 +36,27 @@ class SettingsActivity : Activity() {
             return e
         }
 
-        val equity = num("Exness equity (USD) — Cent অ্যাকাউন্টে USC ÷ 100", p.equityUsd)
+        val equity = num("Exness equity (USD), Exness অ্যাপ → Accounts-এ যা দেখায় — Cent অ্যাকাউন্টে USC ÷ 100", p.equityUsd)
+        val setText = if (p.equitySetMs > 0) DateFormat.format("dd MMM yyyy HH:mm", Date(p.equitySetMs)).toString() else "কখনো না"
+        col.addView(Ui.text(this, "শেষ নিশ্চিত: $setText" +
+            (if (Capital.isStale(p.equitySetMs, System.currentTimeMillis())) " ⚠️ (২৪ ঘণ্টার বেশি পুরনো: লট দেখানো বন্ধ)" else ""),
+            12f, Ui.MUTED))
+        col.addView(Ui.button(this, "✅ Update capital: এই equity এখন Exness-এ দেখেছি", Ui.BULL) {
+            val eq = equity.text.toString().trim().toDoubleOrNull() ?: Double.NaN
+            val bad = SettingsCheck.problems(eq, p.riskPercent, p.spreadPips, p.slippagePips)
+            if (bad.isNotEmpty()) {
+                Toast.makeText(this, bad.joinToString("\n"), Toast.LENGTH_LONG).show()
+                return@button
+            }
+            p.equityUsd = eq
+            p.equitySetMs = System.currentTimeMillis()
+            Toast.makeText(this, "Capital নিশ্চিত করা হলো", Toast.LENGTH_SHORT).show()
+            finish()
+        })
+        col.addView(Ui.text(this,
+            "PC-তেও একই equity লিখুন (`ayesha capital`)। না মিললে PC-র READY 'CAPITAL_MISMATCH' হয়ে যাচাইহীন থাকবে। " +
+                "equity কখনো relay-তে যায় না; শুধু pairing code দিয়ে তৈরি একটা গোপন ছাপ (digest) মেলানো হয়। " +
+                "ডিপোজিট বা উইথড্র ট্রেডের লাভ-ক্ষতি নয়।", 12f, Ui.MUTED))
         val risk = num("প্রতি ট্রেডে risk % (০.১ থেকে ১)", p.riskPercent)
         val spread = num("আন্দাজি spread (pips)", p.spreadPips)
         val slip = num("Slippage buffer (pips)", p.slippagePips)
@@ -50,6 +76,13 @@ class SettingsActivity : Activity() {
             isChecked = p.alertNoTrade
         }
         col.addView(noTrade)
+
+        val newsBox = CheckBox(this).apply {
+            text = "PC-র নিউজ নোটিফিকেশন দেখাও (📰 আসছে, ⛔ প্রোটেকশন, 📊 নিউজের পরে)"
+            setTextColor(Ui.TEXT)
+            isChecked = p.newsNotify
+        }
+        col.addView(newsBox)
 
         col.addView(Ui.text(this, "Watchlist (এর বাইরের পেয়ারের অ্যালার্ট শুধু আর্কাইভে যাবে)", 13f, Ui.MUTED))
         val watchBoxes = StrategyInfo.PAIRS.map { pair ->
@@ -75,8 +108,9 @@ class SettingsActivity : Activity() {
         }
         col.addView(link)
         col.addView(Ui.text(this,
-            "চালু করলে ফোন ntfy.sh নামের একটা ফ্রি পাবলিক relay সার্ভারের সাথে যুক্ত থাকে। সেখানে শুধু সিগন্যাল যায় (পেয়ার, লেভেল, অবস্থা), " +
-                "কোনো লগইন, ব্যালান্স বা পাসওয়ার্ড না। প্রতিটা বার্তা আপনার কোড দিয়ে সই করা; ভুল সই হলে বাদ। ফোন কিছু পাঠায় না।", 12f, Ui.MUTED))
+            "চালু করলে ফোন ntfy.sh নামের একটা ফ্রি পাবলিক relay সার্ভারের সাথে যুক্ত থাকে। সেখানে শুধু সিগন্যাল আর নিউজের অবস্থা যায় " +
+                "(পেয়ার, লেভেল, অবস্থা), কোনো লগইন, ব্যালান্স, equity বা পাসওয়ার্ড না। প্রতিটা বার্তা আপনার কোড দিয়ে সই করা; " +
+                "ভুল সই হলে বাদ। ফোন কিছু পাঠায় না।", 12f, Ui.MUTED))
 
         col.addView(Ui.button(this, "💾 Save", Ui.BULL) {
             val eq = equity.text.toString().trim().toDoubleOrNull() ?: Double.NaN
@@ -88,6 +122,7 @@ class SettingsActivity : Activity() {
                 Toast.makeText(this, bad.joinToString("\n"), Toast.LENGTH_LONG).show()
                 return@button
             }
+            if (eq != p.equityUsd) p.equitySetMs = System.currentTimeMillis()  // a typed new value is a confirmation
             p.equityUsd = eq
             p.riskPercent = rk
             p.spreadPips = sp
@@ -106,6 +141,7 @@ class SettingsActivity : Activity() {
             p.watchlist = chosen
             p.accountType = if (group.checkedRadioButtonId == 102) "StandardCent" else "Standard"
             p.alertNoTrade = noTrade.isChecked
+            p.newsNotify = newsBox.isChecked
             if (norm != null && norm != Signer.normalize(p.pairingCode)) p.linkLastId = ""
             p.pairingCode = norm ?: code.text.toString().trim()
             p.linkEnabled = wantLink

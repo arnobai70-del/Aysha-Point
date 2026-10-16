@@ -33,6 +33,7 @@ object SettingsCheck {
     fun problems(equityUsd: Double, riskPercent: Double, spreadPips: Double, slippagePips: Double): List<String> {
         val out = mutableListOf<String>()
         if (!equityUsd.isFinite() || equityUsd <= 0 || equityUsd > MAX_EQUITY_USD) out.add("Equity ০-এর বেশি একটা সঠিক সংখ্যা দিন")
+        else if (kotlin.math.abs(equityUsd * 100 - Math.round(equityUsd * 100)) > 1e-6) out.add("Equity দুই দশমিক পর্যন্ত লিখুন (যেমন 25.40)")
         if (!riskPercent.isFinite() || riskPercent < MIN_RISK_PERCENT || riskPercent > MAX_RISK_PERCENT) out.add("Risk % ০.১ থেকে ১-এর মধ্যে দিন")
         if (!spreadPips.isFinite() || spreadPips < 0 || spreadPips > MAX_COST_PIPS) out.add("Spread ০ থেকে ২০ pips-এর মধ্যে দিন")
         if (!slippagePips.isFinite() || slippagePips < 0 || slippagePips > MAX_COST_PIPS) out.add("Slippage ০ থেকে ২০ pips-এর মধ্যে দিন")
@@ -73,6 +74,18 @@ object LotCalc {
 
     private fun fail(status: String, note: String, stopPips: Double = 0.0, budget: Double = 0.0) =
         LotResult(status, 0.0, 0.0, budget, 0.0, 0.0, stopPips, note)
+
+    /** A lot that may not be shown, with the reason (e.g. the phone's equity is not confirmed). */
+    fun blocked(note: String): LotResult = fail(RISK_UNVERIFIED, note)
+
+    /**
+     * For a PC alert: never show more than the PC's own lot. The PC also counts today's losses and open
+     * trades (remaining daily / open-risk budget), which the phone cannot see.
+     */
+    fun capToPc(own: LotResult, pcLot: Double): LotResult =
+        if (own.ok && pcLot.isFinite() && pcLot >= MIN_LOT && pcLot < own.lot - 1e-9)
+            own.copy(lot = pcLot, maxLossUsd = own.maxLossUsd * pcLot / own.lot)
+        else own
 
     /**
      * @param chartQuoteUsd quote->USD rate sent by the indicator (QUSD=), used only for crosses such as EURJPY.

@@ -3,8 +3,11 @@ package com.ayesha.fx
 import android.content.Context
 import com.ayesha.fx.core.AyeshaAlert
 import com.ayesha.fx.core.Backup
+import com.ayesha.fx.core.Capital
 import com.ayesha.fx.core.JournalTrade
 import com.ayesha.fx.core.Mtf
+import com.ayesha.fx.core.News
+import com.ayesha.fx.core.NewsNotice
 import com.ayesha.fx.core.StrategyInfo
 import com.ayesha.fx.core.Transitions
 import org.json.JSONArray
@@ -36,6 +39,17 @@ class Prefs(context: Context) {
     var pausedUntilMs: Long
         get() = p.getLong("pausedUntil", 0L)
         set(v) = p.edit().putLong("pausedUntil", v).apply()
+
+    /** When the owner last confirmed the equity above (ms); 0 = never. No lot is shown when older than a day. */
+    var equitySetMs: Long
+        get() = p.getLong("equitySetMs", 0L)
+        set(v) = p.edit().putLong("equitySetMs", v).apply()
+    var newsNotify: Boolean
+        get() = p.getBoolean("newsNotify", true)
+        set(v) = p.edit().putBoolean("newsNotify", v).apply()
+
+    /** Fingerprint of this phone's equity for comparing with the PC's (CAPH=). Never sent anywhere. */
+    fun capitalDigest(): String? = Capital.digest(pairingCode, equityUsd)
 
     /** Pairs the owner wants alerts for; anything else is archived. */
     var watchlist: Set<String>
@@ -70,6 +84,10 @@ class Prefs(context: Context) {
     var hbVersion: String
         get() = p.getString("hbVersion", "")!!
         set(v) = p.edit().putString("hbVersion", v).apply()
+    /** PC capital status from its heartbeat (CAP=): OK, STALE, UNVERIFIED, MISSING, ... ("" from older PCs). */
+    var hbCapital: String
+        get() = p.getString("hbCapital", "")!!
+        set(v) = p.edit().putString("hbCapital", v).apply()
 
     // --- diagnostics ------------------------------------------------------------------------
     var lastTvSeenMs: Long
@@ -92,7 +110,11 @@ class Prefs(context: Context) {
         .put("spread", spreadPips).put("slip", slippagePips).put("watchlist", JSONArray(watchlist.sorted()))
 
     fun restoreSettings(o: JSONObject) {
-        o.optDouble("equity").takeIf { it.isFinite() && it > 0 }?.let { equityUsd = it }
+        // a restored equity is not a confirmation: it must be checked against Exness again
+        o.optDouble("equity").takeIf { it.isFinite() && it > 0 }?.let {
+            if (it != equityUsd) equitySetMs = 0L
+            equityUsd = it
+        }
         o.optDouble("risk").takeIf { it.isFinite() && it > 0 && it <= 1.0 }?.let { riskPercent = it }
         o.optString("account").takeIf { it == "Standard" || it == "StandardCent" }?.let { accountType = it }
         o.optDouble("spread").takeIf { it.isFinite() && it >= 0 }?.let { spreadPips = it }
@@ -254,6 +276,11 @@ class AlertStore(context: Context) {
             .put("status", a.status).put("origin", a.origin).put("signalId", a.signalId)
             .put("expiresUtcMs", a.expiresUtcMs ?: JSONObject.NULL).put("blockers", JSONArray(a.blockers))
             .put("signatureOk", a.signatureOk).put("mtf", Mtf.encode(a.mtf))
+            .put("wireFormat", a.wireFormat).put("newsPhase", a.newsPhase).put("newsEventId", a.newsEventId)
+            .put("newsTimeMs", a.newsTimeMs ?: JSONObject.NULL).put("newsImpact", a.newsImpact)
+            .put("newsVerifiedMs", a.newsVerifiedMs ?: JSONObject.NULL).put("capitalVersion", a.capitalVersion)
+            .put("capitalTimeMs", a.capitalTimeMs ?: JSONObject.NULL).put("capitalDigest", a.capitalDigest)
+            .put("riskPercent", a.riskPercent ?: JSONObject.NULL).put("specKind", a.specKind)
             .put("userStatus", e.userStatus).put("resultUsd", e.resultUsd ?: JSONObject.NULL)
             .put("riskUsd", e.riskUsd ?: JSONObject.NULL).put("closedAtMs", e.closedAtMs ?: JSONObject.NULL)
     }
@@ -277,6 +304,18 @@ class AlertStore(context: Context) {
                 blockers = o.optJSONArray("blockers")?.let { arr -> (0 until arr.length()).map { arr.getString(it) } } ?: emptyList(),
                 signatureOk = o.optBoolean("signatureOk", false),
                 mtf = Mtf.parse(o.optString("mtf", "")),
+                wireFormat = o.optInt("wireFormat", 0),
+                newsPhase = o.optString("newsPhase", ""),
+                newsEventId = o.optString("newsEventId", ""),
+                newsTimeMs = optLong(o, "newsTimeMs"),
+                newsImpact = o.optString("newsImpact", ""),
+                newsVerifiedMs = optLong(o, "newsVerifiedMs"),
+                capitalVersion = o.optInt("capitalVersion", 0),
+                capitalTimeMs = optLong(o, "capitalTimeMs"),
+                capitalDigest = o.optString("capitalDigest", ""),
+                riskPercent = if (!o.has("riskPercent") || o.isNull("riskPercent")) null
+                    else o.optDouble("riskPercent").takeIf { it.isFinite() },
+                specKind = o.optString("specKind", ""),
             ),
             userStatus = o.optString("userStatus", "NEW"),
             resultUsd = if (o.isNull("resultUsd")) null else o.optDouble("resultUsd").takeIf { it.isFinite() },
@@ -285,5 +324,48 @@ class AlertStore(context: Context) {
         )
     } catch (e: Exception) {
         null
+    }
+
+    private fun optLong(o: JSONObject, k: String): Long? = if (!o.has(k) || o.isNull(k)) null else o.optLong(k)
+}
+
+/**
+ * Signed PC news notices (last 100), one per event and phase. Information and protection status only;
+ * never a trade signal. Stored as the verified text and re-parsed on read.
+ */
+class NewsStore(context: Context) {
+    private val file = File(context.filesDir, "news.json")
+
+    companion object {
+        private val LOCK = Any()
+        const val KEEP = 100
+    }
+
+    fun all(): List<NewsNotice> = synchronized(LOCK) { readLocked() }
+
+    private fun readLocked(): List<NewsNotice> {
+        if (!file.exists()) return emptyList()
+        return try {
+            val arr = JSONArray(file.readText())
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.getJSONObject(i)
+                News.parse(o.getString("raw"), o.getLong("receivedAtMs"))
+            }
+        } catch (e: Exception) {
+            file.renameTo(File(file.parentFile, "news.corrupt-${System.currentTimeMillis()}.json"))
+            emptyList()
+        }
+    }
+
+    /** False when this event and phase is already stored (a relay replay): never notified twice. */
+    fun add(n: NewsNotice): Boolean = synchronized(LOCK) {
+        val list = readLocked()
+        if (list.any { it.key == n.key }) return false
+        val arr = JSONArray()
+        (listOf(n) + list).take(KEEP).forEach { arr.put(JSONObject().put("raw", it.raw).put("receivedAtMs", it.receivedAtMs)) }
+        val tmp = File(file.parentFile, "news.json.tmp")
+        tmp.writeText(arr.toString())
+        tmp.renameTo(file)
+        true
     }
 }

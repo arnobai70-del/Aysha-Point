@@ -78,9 +78,14 @@ object Mtf {
     }
 }
 
-/** Which PC status updates may replace a stored one (same signal id). Anything else is a replay and is ignored. */
+/**
+ * Which PC status updates may replace a stored one (same signal id). Anything else is a replay and is ignored.
+ * WATCH -> READY (M5 confirmed) or NO_TRADE; READY -> NO_TRADE (INVALIDATED before entry, e.g. a new news
+ * lockout). A block is never lifted: NO_TRADE never becomes READY again.
+ */
 object Transitions {
-    fun allowed(old: String, new: String): Boolean = old == "WATCH" && (new == "READY" || new == "NO_TRADE")
+    fun allowed(old: String, new: String): Boolean =
+        (old == "WATCH" && (new == "READY" || new == "NO_TRADE")) || (old == "READY" && new == "NO_TRADE")
 }
 
 /** PC link freshness judged by the PC's own heartbeat time, so a replayed old heartbeat cannot look "online". */

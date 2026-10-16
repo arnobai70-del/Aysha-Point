@@ -11,13 +11,16 @@ import android.widget.LinearLayout
 import android.widget.Toast
 import com.ayesha.fx.core.AlertParser
 import com.ayesha.fx.core.Assess
+import com.ayesha.fx.core.Capital
 import com.ayesha.fx.core.LinkHealth
+import com.ayesha.fx.core.LotCalc
+import com.ayesha.fx.core.News
 import com.ayesha.fx.core.SettingsCheck
 import com.ayesha.fx.core.StrategyInfo
 import java.util.Date
 import java.util.Locale
 
-/** Home: setup status, PC link health, diagnostics and the alert inbox (active / archive). */
+/** Home: setup status, capital, news watch, PC link health, diagnostics and the alert inbox (active / archive). */
 class MainActivity : Activity() {
     private lateinit var col: LinearLayout
     private var showArchive = false
@@ -50,18 +53,21 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun hhmm(ms: Long): String = DateFormat.format("HH:mm", Date(ms)).toString()
+
     private fun render() {
         col.removeAllViews()
         val prefs = Prefs(this)
         val listener = AlertListener.isEnabled(this)
         val notif = Notifier.canPost(this)
         val now = System.currentTimeMillis()
+        val entries = AlertStore(this).all()
+        val notices = NewsStore(this).all()
 
         val status = Ui.card(this, if (listener && notif) Ui.BULL else Ui.WATCH)
         status.addView(Ui.text(this, "অবস্থা", 13f, Ui.MUTED))
         status.addView(Ui.text(this, (if (listener) "✅" else "⚠️") + " TradingView নোটিফিকেশন পড়ার অনুমতি", 15f))
         status.addView(Ui.text(this, (if (notif) "✅" else "⚠️") + " AYESHA নোটিফিকেশন দেখানোর অনুমতি", 15f))
-        status.addView(Ui.text(this, "Equity \$${prefs.equityUsd} · risk ${prefs.riskPercent}% · Exness ${prefs.accountType}", 13f, Ui.MUTED))
         val bad = SettingsCheck.problems(prefs.equityUsd, prefs.riskPercent, prefs.spreadPips, prefs.slippagePips)
         if (bad.isNotEmpty()) {
             status.addView(Ui.text(this, "⚠️ Settings ঠিক নেই, তাই কোনো লট দেখানো হবে না: " + bad.joinToString("; "), 14f, Ui.WATCH, bold = true))
@@ -84,6 +90,86 @@ class MainActivity : Activity() {
             })
         }
         col.addView(status)
+
+        // Capital: the owner's Exness equity sizes every lot. It is a variable (it grows or falls), so it must be
+        // confirmed at least once a day, here and on the PC (`ayesha capital`). It never leaves the phone.
+        val capStale = Capital.isStale(prefs.equitySetMs, now)
+        val cap = Ui.card(this, if (capStale) Ui.WATCH else Ui.BULL)
+        cap.addView(Ui.text(this, "💰 Capital (আপনার Exness equity)", 13f, Ui.MUTED))
+        val budget = prefs.equityUsd * prefs.riskPercent / 100.0
+        cap.addView(Ui.text(this, String.format(Locale.US, "Equity \$%.2f · risk %.2f%% → প্রতি ট্রেডে সর্বোচ্চ ঝুঁকি \$%.2f",
+            prefs.equityUsd, prefs.riskPercent, budget), 15f, bold = true))
+        cap.addView(Ui.text(this, "Exness ${prefs.accountType} · শেষ নিশ্চিত: ${ago(prefs.equitySetMs)}", 12f, Ui.MUTED))
+        if (capStale) {
+            cap.addView(Ui.text(this, "⚠️ ২৪ ঘণ্টার মধ্যে নিশ্চিত করা হয়নি: Exness অ্যাপ → Accounts দেখে Update capital করুন। " +
+                "ততক্ষণ ফোন কোনো লট দেখাবে না।", 13f, Ui.WATCH))
+        }
+        // what the 0.01 minimum lot means at this equity (why a small Standard account often gets NO TRADE)
+        val probe = LotCalc.calc("EURUSD", 1.10000, 1.09850, prefs.equityUsd, prefs.riskPercent, prefs.accountType,
+            prefs.spreadPips, prefs.slippagePips)
+        if (probe.status == LotCalc.NO_TRADE_MIN_LOT) {
+            cap.addView(Ui.text(this, String.format(Locale.US,
+                "এই equity-তে EURUSD-এ 15 pip SL হলে 0.01 লটের ঝুঁকি \$%.2f (equity-র %.1f%%), সীমা \$%.2f। তাই বেশিরভাগ " +
+                    "সিগন্যাল NO TRADE হবে; এটা সুরক্ষা। equity বাড়লে একই নিয়মে লট নিজে থেকেই হিসাব হবে।",
+                probe.minLotLossUsd, probe.minLotLossPercent, probe.budgetUsd), 12f, Ui.MUTED))
+        } else if (probe.ok) {
+            cap.addView(Ui.text(this, String.format(Locale.US, "উদাহরণ: EURUSD-এ 15 pip SL হলে লট %.2f (সর্বোচ্চ লস \$%.2f)।",
+                probe.lot, probe.maxLossUsd), 12f, Ui.MUTED))
+        }
+        if (prefs.linkEnabled) {
+            val lastPc = entries.firstOrNull { it.alert.isPc && it.alert.wireFormat >= Assess.MIN_WIRE_FORMAT && it.alert.capitalDigest.isNotBlank() }?.alert
+            val cmp = lastPc?.let { Capital.compare(it.capitalDigest, prefs.capitalDigest()) }
+            cap.addView(Ui.text(this, when (cmp) {
+                null -> "PC-র সাথে এখনো মিলানো যায়নি (PC 0.8.0 থেকে সিগন্যাল এলে দেখাবে)।"
+                Capital.OK -> "✅ শেষ PC সিগন্যালের equity-র সাথে মিল আছে।"
+                Capital.MISMATCH -> "⚠️ CAPITAL_MISMATCH: শেষ PC সিগন্যাল অন্য equity দিয়ে হিসাব করা। PC-তে `ayesha capital` আর এখানে " +
+                    "একই সংখ্যা লিখুন; ততক্ষণ PC READY যাচাইহীন থাকবে।"
+                else -> "⚠️ PC বা ফোনের equity যাচাই করা যায়নি।"
+            }, 12f, if (cmp == Capital.OK) Ui.MUTED else Ui.WATCH))
+            if (prefs.hbCapital.isNotBlank() && prefs.hbCapital != "OK") {
+                cap.addView(Ui.text(this, "⚠️ PC-র capital অবস্থা: ${prefs.hbCapital}। PC-তে `ayesha capital` চালিয়ে Exness equity আর খোলা ট্রেড লিখুন।", 12f, Ui.WATCH))
+            }
+        }
+        cap.addView(Ui.row(this,
+            Ui.button(this, "✏️ Update capital", Ui.SKY) { startActivity(Intent(this, SettingsActivity::class.java)) },
+            Ui.button(this, "✅ একই আছে", Ui.OFF) {
+                prefs.equitySetMs = System.currentTimeMillis()
+                Toast.makeText(this, "Equity নিশ্চিত করা হলো", Toast.LENGTH_SHORT).show()
+                render()
+            },
+        ))
+        cap.addView(Ui.text(this, "\"একই আছে\" চাপুন শুধু Exness অ্যাপে equity দেখে নেওয়ার পরে। ডিপোজিট বা উইথড্র লাভ-ক্ষতি নয়; " +
+            "সংখ্যা বদলালে Update capital করুন। equity ফোন থেকে কোথাও যায় না।", 11f, Ui.MUTED))
+        col.addView(cap)
+
+        // News watch from the PC: information and protection status, never trade signals.
+        val current = News.current(notices, now)
+        val newsActive = current.any { now >= it.windowStartMs && now < it.windowEndMs }
+        val nc = Ui.card(this, if (newsActive) Ui.BEAR else Ui.OFF)
+        nc.addView(Ui.text(this, "📰 নিউজ (PC থেকে · ট্রেড সিগন্যাল নয়)", 13f, Ui.MUTED))
+        if (!prefs.linkEnabled) {
+            nc.addView(Ui.text(this, "PC link বন্ধ, তাই নিউজের খবর আসবে না। TradingView ক্যান্ডিডেট নেওয়ার আগে ForexFactory calendar নিজে দেখুন।", 13f))
+        } else if (current.isEmpty()) {
+            nc.addView(Ui.text(this, "সামনে বড় নিউজের কোনো খবর PC পাঠায়নি। PC চালু থাকলে লকআউটের প্রায় ১ ঘণ্টা আগে জানায়।", 13f))
+        }
+        for (n in current) {
+            val phaseText = when {
+                now < n.windowStartMs -> "আসছে · লকআউট ${hhmm(n.windowStartMs)} থেকে"
+                now < n.windowEndMs -> "⛔ লকআউট চলছে (${hhmm(n.windowEndMs)} পর্যন্ত), নতুন ট্রেড বন্ধ"
+                n.settled == "Y" -> "✅ উইন্ডো শেষ, PC বলছে বাজার শান্ত"
+                else -> "⏳ উইন্ডো শেষ; বাজার শান্ত হওয়ার অপেক্ষা"
+            }
+            nc.addView(Ui.text(this, "${hhmm(n.eventMs)} ${n.currency} ${n.title} · ${n.impact}/${n.tier}", 14f, bold = true))
+            nc.addView(Ui.text(this, "$phaseText · ${n.pairs.joinToString(" ")}" +
+                (if (n.eventState != "SCHEDULED") " · ${n.eventState}" else ""), 12f,
+                if (now >= n.windowStartMs && now < n.windowEndMs) Ui.WATCH else Ui.MUTED))
+            if (n.category == News.REACTION) {
+                nc.addView(Ui.text(this, "প্রতিক্রিয়া: ${News.reactionLabel(n.reactionState)}", 12f, Ui.MUTED))
+            } else if (n.scenario.isNotBlank()) {
+                nc.addView(Ui.text(this, "শর্তসাপেক্ষ, ভবিষ্যদ্বাণী নয়: ${n.scenario}", 11f, Ui.MUTED))
+            }
+        }
+        col.addView(nc)
 
         // PC link health: the owner must be able to see when the PC scanner is off or its data is stale.
         val link = Ui.card(this, if (!prefs.linkEnabled) Ui.OFF else Ui.SKY)
@@ -130,8 +216,7 @@ class MainActivity : Activity() {
             },
         ))
 
-        val entries = AlertStore(this).all()
-        val judged = entries.map { it to Notifier.assess(this, it.alert, now) }
+        val judged = entries.map { it to Notifier.assess(this, it.alert, now, notices) }
         val active = judged.filter { it.second.active }
         val archive = judged.filter { !it.second.active }
         col.addView(Ui.row(this,
@@ -178,7 +263,10 @@ class MainActivity : Activity() {
         for (s in listOf(Assess.READY, Assess.WATCH, Assess.CHART_CANDIDATE, Assess.NO_TRADE, Assess.UNVERIFIED, Assess.EXPIRED)) {
             help.addView(Ui.text(this, "${Notifier.stateLabel(s)}: ${Notifier.stateMeaning(s)}", 12f))
         }
-        help.addView(Ui.text(this, "নোটিফিকেশন আসে শুধু READY আর চার্ট ক্যান্ডিডেটের জন্য। WATCH থেকে READY হলে আবার জানাবে।", 12f, Ui.MUTED))
+        help.addView(Ui.text(this, "নোটিফিকেশন আসে শুধু READY আর চার্ট ক্যান্ডিডেটের জন্য। WATCH থেকে READY হলে আবার জানাবে; " +
+            "PC কোনো READY বাতিল করলে (যেমন নতুন নিউজ লকআউট) \"⛔ বাতিল\" নোটিফিকেশন আসবে।", 12f, Ui.MUTED))
+        help.addView(Ui.text(this, "নিউজ নোটিফিকেশন আলাদা: 📰 আসছে (তথ্য), ⛔ প্রোটেকশন (নতুন ট্রেড বন্ধ), 📊 নিউজের পরে (বাজারের প্রতিক্রিয়া)। " +
+            "কোনোটাই কেনা-বেচার নির্দেশ নয়।", 12f, Ui.MUTED))
         col.addView(help)
 
         if (entries.any { it.alert.isTest }) {

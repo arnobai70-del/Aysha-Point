@@ -33,9 +33,14 @@ class AlertListener : NotificationListenerService() {
                 Prefs(context).reject("পড়া যায়নি বা লেভেল ভুল: " + text.lineSequence().firstOrNull().orEmpty().take(60))
                 return
             }
-            when (AlertStore(context).upsert(alert)) {
+            val store = AlertStore(context)
+            val before = store.get(alert.id)?.alert?.status
+            when (store.upsert(alert)) {
                 AlertStore.Upsert.NEW -> Notifier.show(context, alert)
-                AlertStore.Upsert.UPDATED -> Notifier.show(context, alert, update = true)
+                AlertStore.Upsert.UPDATED ->
+                    // READY -> NO_TRADE: the PC cancelled it before entry (e.g. a new news lockout). Always say so.
+                    if (before == "READY" && alert.status == "NO_TRADE") Notifier.showCancelled(context, alert)
+                    else Notifier.show(context, alert, update = true)
                 AlertStore.Upsert.DUPLICATE -> {}
             }
         }

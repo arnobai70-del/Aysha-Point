@@ -12,6 +12,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.ayesha.fx.core.Assess
+import com.ayesha.fx.core.Capital
 import com.ayesha.fx.core.Journal
 import com.ayesha.fx.core.LotCalc
 import com.ayesha.fx.core.Mtf
@@ -66,6 +67,10 @@ class DetailActivity : Activity() {
         head.addView(Ui.text(this,
             if (expired) "⌛ মেয়াদ শেষ ($exp)। এখন আর এই entry নেবেন না।" else "⏳ $exp পর্যন্ত বৈধ। দাম entry থেকে অনেক দূরে চলে গেলে পিছনে দৌড়াবেন না।",
             14f, if (expired) Ui.WATCH else Ui.TEXT))
+        if (a.isInvalidated) {
+            head.addView(Ui.text(this, "⛔ বাতিল (INVALIDATED): PC এই setup entry-র আগেই বাতিল করেছে — নেবেন না। " +
+                "কারণ: " + a.blockers.filter { it != "INVALIDATED" }.joinToString(", "), 15f, Ui.BEAR, bold = true))
+        }
         col.addView(head)
 
         // What was and was not checked, with the reasons. Never implies execution approval.
@@ -84,8 +89,19 @@ class DetailActivity : Activity() {
                     "❌ Exness-এর আসল spread যাচাই হয়নি — অ্যাপে spread দেখুন\n" +
                     "❌ Exness-এর contract/লট নিয়ম যাচাই হয়নি — অ্যাপে লট মিলিয়ে নিন", 13f))
         }
+        if (a.isPc && a.wireFormat >= Assess.MIN_WIRE_FORMAT) {
+            fun t(ms: Long?) = ms?.let { DateFormat.format("dd MMM HH:mm", Date(it)).toString() } ?: "নেই"
+            val ev = if (a.newsEventId.isNotBlank()) " · ${a.newsImpact} ইভেন্ট ${t(a.newsTimeMs)}" else ""
+            gates.addView(Ui.text(this, "নিউজ: ${a.newsPhase.ifBlank { "নেই" }}$ev · PC ক্যালেন্ডার যাচাই ${t(a.newsVerifiedMs)}", 13f))
+            val cmp = Capital.compare(a.capitalDigest, prefs.capitalDigest())
+            gates.addView(Ui.text(this, "Capital: PC snapshot v${a.capitalVersion} (${t(a.capitalTimeMs)}, মালিকের লেখা) · " + when (cmp) {
+                Capital.OK -> "ফোনের equity-র সাথে মিল ✅"
+                Capital.MISMATCH -> "ফোনের equity-র সাথে মেলে না ⚠️"
+                else -> "যাচাই হয়নি ⚠️"
+            } + " · risk ${a.riskPercent?.let { "$it%" } ?: "?"} · contract ${a.specKind.ifBlank { "?" }}", 13f))
+        }
         if (a.isPc && a.chartLot > 0) {
-            gates.addView(Ui.text(this, "PC-র হিসাবে লট ${f2(a.chartLot)} (PC-র equity দিয়ে)। নিচের লট এই ফোনের settings দিয়ে; দুটো আলাদা হলে settings মিলিয়ে নিন।", 12f, Ui.MUTED))
+            gates.addView(Ui.text(this, "PC-র হিসাবে লট ${f2(a.chartLot)} (আজকের লস আর খোলা ট্রেডের ঝুঁকি বাদ দিয়ে)। ফোন কখনো এর বেশি দেখায় না।", 12f, Ui.MUTED))
         }
         if (a.isPc) {
             gates.addView(Ui.text(this, "PC-র দাম OANDA/MT5 feed থেকে; Exness-এর দাম সামান্য আলাদা হতে পারে।", 12f, Ui.MUTED))
@@ -107,6 +123,9 @@ class DetailActivity : Activity() {
         if (r.ok) {
             risk.addView(Ui.text(this, "Lot ${f2(r.lot)}  ·  সর্বোচ্চ লস \$${f2(r.maxLossUsd)}", 18f, bold = true))
             risk.addView(Ui.text(this, "Budget \$${f2(r.budgetUsd)} (${prefs.riskPercent}% of \$${prefs.equityUsd}) · SL ${String.format(Locale.US, "%.1f", r.stopPips)} pips", 13f, Ui.MUTED))
+            if (a.isPc && a.chartLot >= 0.01 && r.lot + 1e-9 >= a.chartLot && r.lot <= a.chartLot + 1e-9) {
+                risk.addView(Ui.text(this, "PC-র লটের সমান রাখা হয়েছে (PC দৈনিক ও খোলা-ঝুঁকির বাজেটও গোনে)।", 12f, Ui.MUTED))
+            }
             if (r.rateSource == "CHART") {
                 risk.addView(Ui.text(this, "এই পেয়ারের USD রেট TradingView চার্ট থেকে নেওয়া।", 12f, Ui.MUTED))
             }
@@ -119,7 +138,8 @@ class DetailActivity : Activity() {
             risk.addView(Ui.text(this, "⛔ " + Notifier.statusText(r), 18f, Ui.BEAR, bold = true))
             risk.addView(Ui.text(this, r.note + "। এই সিগন্যালে ট্রেড নেবেন না, অথবা Exness অ্যাপে নিজে হিসাব করুন।", 14f))
         }
-        risk.addView(Ui.text(this, "Exness অ্যাপে আসল spread আর lot মিলিয়ে নিন। বড় নিউজের ৩০ মিনিট আগে-পরে ট্রেড নেবেন না।", 12f, Ui.MUTED))
+        risk.addView(Ui.text(this, "Exness অ্যাপে আসল spread আর lot মিলিয়ে নিন। বড় নিউজের আগে-পরে নতুন ট্রেড নেবেন না " +
+            "(CPI/NFP/FOMC: ৪৫ মিনিট আগে থেকে; পরে বাজার শান্ত না হওয়া পর্যন্ত)।", 12f, Ui.MUTED))
         col.addView(risk)
 
         val mtfLines = Mtf.explain(a.mtf, a.isBuy)

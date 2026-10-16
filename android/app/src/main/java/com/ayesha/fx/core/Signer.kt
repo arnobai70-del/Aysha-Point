@@ -42,14 +42,18 @@ object Signer {
     }
 }
 
-/** "AYESHA HB T=<ms> STATE=OK PAIRS=5 V=<hash>": the PC scanner says it is alive and whether its data is fresh. */
-data class Heartbeat(val pcTimeMs: Long, val state: String, val pairs: Int, val version: String) {
+/**
+ * "AYESHA HB T=<ms> STATE=OK PAIRS=5 V=<hash> CAP=OK": the PC scanner says it is alive, whether its data is
+ * fresh and whether its capital snapshot is usable (CAP=, PC 0.8.0+; "" from older PCs).
+ */
+data class Heartbeat(val pcTimeMs: Long, val state: String, val pairs: Int, val version: String, val capital: String = "") {
     companion object {
-        private val re = Regex("""^AYESHA HB T=(\d+) STATE=([A-Z_]+) PAIRS=(\d+) V=(\S+)""")
+        private val re = Regex("""^AYESHA HB T=(\d+) STATE=([A-Z_]+) PAIRS=(\d+) V=(\S+)(?: CAP=([A-Za-z0-9_.-]+))?""")
 
         fun parse(body: String): Heartbeat? {
             val m = re.find(body.trim()) ?: return null
-            return Heartbeat(m.groupValues[1].toLong(), m.groupValues[2], m.groupValues[3].toInt(), m.groupValues[4])
+            return Heartbeat(m.groupValues[1].toLong(), m.groupValues[2], m.groupValues[3].toInt(), m.groupValues[4],
+                m.groupValues[5])
         }
     }
 }
