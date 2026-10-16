@@ -1,0 +1,241 @@
+{
+ "cli": {
+  "(top)": "21185d9c6335a0cd323ef1ed774c4d51fc46f08b863c24862cc9ca5179ed8223",
+  "backtest": "20199965a4d08e310689598d36d80c1acc421591f40ec2f017be166dd4e89f29",
+  "backtest-run": "92e2d59adef99626ed317d18664b9f86c9dcbfad4251e91eecb3e9b481c81c72",
+  "capital": "450c66aea28ab2d1a64e820975fcfa2dea7897552469994f51dc991af58e8b24",
+  "confirm-broker": "1dd54eac8c2725152202c891c3bd92fbabf1ad808ab77190fba871e93d523390",
+  "doctor": "c87047a642055670c3cfb15191c1273fe4dd9a11ea477a0e42eaabcae74abdf4",
+  "export": "70006c156213a86d16d38f258296926199b84bc8a55f62c2bee962e706c4a625",
+  "lot-table": "8ef324cae9c5922a33e228a5c5dce9204473973740c5d50cfe2ed6b7c2d596e2",
+  "make-signing-key": "85f710aa58855c5570160d32c6d15456471ea68506dd1e2697c0fa4b128a0125",
+  "mark": "3209210765ff8e842d5464bb61413476aba8990ba0b43e0fdfc8247e57054083",
+  "pair": "36404f950034fdb63776701afe4f2aaea18d482266ffad0e53ad4ec54c158c4e",
+  "push-test": "8c945ea78c5edcf8ce0ed69b7841c6d9e899d0f87d9931a9d6f69bae7af26b0b",
+  "report": "e0b5b96b3d599d7096f0a2916ff364aae304e44a786d6707bf1a34751cb139a2",
+  "risk": "d4c07b1e5e3a800021882c907beea528db7f91f589ee57a673d5986099136892",
+  "scan": "12e10c7ff927d28edf6a626bc613ac687d30847509bf602e81aeecd7d40752ed",
+  "set-token": "123d0a497f29fe848b298bfbbb85a3360ea166e1566feb4b75f19657b69fb6c2",
+  "setup": "4698bb83d57cf4b7f8ca394fa512928669f0206e51feb141d8f096d352074793",
+  "signals": "b595347485fdd7211da1b6229c230156c08f4a2987d00f410d8fcae5bae605ac",
+  "spec-check": "8c945ea78c5edcf8ce0ed69b7841c6d9e899d0f87d9931a9d6f69bae7af26b0b",
+  "telegram-test": "8c945ea78c5edcf8ce0ed69b7841c6d9e899d0f87d9931a9d6f69bae7af26b0b"
+ },
+ "generated_from": "release 0.8.0, commit 7e7da2e715544dbbc023570275776258abd8bdd4",
+ "note": "SYNTHETIC integer-walk prices; a compatibility fingerprint, never evidence of an edge",
+ "protected_files": {
+  "android/app/src/main/AndroidManifest.xml": "a0696159316ac3b8c8080665fe2097f449a7a5979de7e7469af24cbc6f79bb7c",
+  "android/app/src/main/java/com/ayesha/fx/AlertListener.kt": "70c049d3ca12685b98a1c5486fe53487175bf9daadc4cdbaa311ccb325e2b0fa",
+  "android/app/src/main/java/com/ayesha/fx/DetailActivity.kt": "d72c09bfa52a85bf5938c490881936cadc7a8fa5ceb1bbc69cfdb0b6fe0c6461",
+  "android/app/src/main/java/com/ayesha/fx/JournalActivity.kt": "04645597894f65b72db19d1f83fe23601d26d072195318d935d90e9e0f355c32",
+  "android/app/src/main/java/com/ayesha/fx/LinkService.kt": "c1101e5b5c6b6d9d55e25352c84be8b28fc812a69a7c0447dcad9e1ee26f193d",
+  "android/app/src/main/java/com/ayesha/fx/MainActivity.kt": "f5f76a968ff365dea71f896afac6e12e53b8362490f9539cc34a5ab88e834170",
+  "android/app/src/main/java/com/ayesha/fx/Notifier.kt": "d94789e6c117552e35bd9f083b5e43e44da126a470e882fda310b226bf73a5ec",
+  "android/app/src/main/java/com/ayesha/fx/SettingsActivity.kt": "ed1ea21b4a50edd8ea8b5581fa199ed8bd8c08d30f49bbfa4d6fe990e3b5c98a",
+  "android/app/src/main/java/com/ayesha/fx/Store.kt": "bb815ec1edfd233e64c8aa80d611243c1d0bd4f23d29ad87ac341e3b1e72b2d8",
+  "android/app/src/main/java/com/ayesha/fx/Ui.kt": "38857700568aaa1c0008c884d1188543ab9d35248ed30cd9ab45734a2b0f5eb3",
+  "android/app/src/main/java/com/ayesha/fx/core/Assess.kt": "a0c9cb291b483b7fd9155fd1e0014bfe9f5b179bd56385d08657a49f123ad76d",
+  "android/app/src/main/java/com/ayesha/fx/core/AyeshaAlert.kt": "0c61144986866dfef1198b4fa2be7ee7dd65ef550732ca65d62f943de7386ddc",
+  "android/app/src/main/java/com/ayesha/fx/core/Backup.kt": "169744fa1c2569b3996bb967723c767f0a8ecd7677a6082a45898de6ca07928f",
+  "android/app/src/main/java/com/ayesha/fx/core/Capital.kt": "90589f9e3570a793f6227f084ce526b1684152b8fd4c255543fdf594b998c2b0",
+  "android/app/src/main/java/com/ayesha/fx/core/Journal.kt": "25c20eb7254522f3adcc3c81e00419aaedd1b07f659305a325909f44e9f6035d",
+  "android/app/src/main/java/com/ayesha/fx/core/LotCalc.kt": "97f328ad6a690e016a174c5b9f8ae69ef2684307a3f107853d1cc861522d67d5",
+  "android/app/src/main/java/com/ayesha/fx/core/Mtf.kt": "243bc19ceeb6e9a9d853c4df457edb3bfe47ecfeb409ee1b387e2e3f7eb368db",
+  "android/app/src/main/java/com/ayesha/fx/core/News.kt": "f935e245037c0bb6660f1a704409bff87b999ed7af15239b1e9ac3e6b07c9b06",
+  "android/app/src/main/java/com/ayesha/fx/core/Signer.kt": "f1ebb6d43e4001a38266a2a21ef9b25f7dde3d6c0fb5ac4e7ac5daaad4806965",
+  "android/app/src/main/java/com/ayesha/fx/core/StrategyInfo.kt": "f9e182ca1891bc4102cff830afe386397b95d0f4617e91ee5ba71ed73ff49af7",
+  "android/app/src/main/res/drawable/ic_launcher.xml": "bab1679878c077ddecbda39d3665781f7ffb447d7c9fe31f90c065f0ab9af477",
+  "android/app/src/main/res/drawable/ic_stat.xml": "0b649bfc63bb6e94ead789481d15b0628e362b5ca8e202217fc5722b5faeb044",
+  "android/app/src/test/java/com/ayesha/fx/core/CoreTest.kt": "9e6fb3071f4e11c7911148bf32ecc93ed6dedf76c889655e93987357466685fd",
+  "contracts/broker/exness-standard.yaml": "b6bdca855761b7540b6e0f1f7ada444a8eb124f65753d885fa2613158aa940a0",
+  "contracts/fixtures/pc-news-lockout.txt": "060567bf53ec9f00c4c954f016b3e5fc49a0a3af32ae1c8013916d8c5ce6df8a",
+  "contracts/fixtures/pc-push-ready.txt": "99add53069f681c67e15f0fa58a42370c2a78e03c31ab39d925df2e1997ba219",
+  "contracts/signal.schema.json": "e7285cd48254ab5f3de3eaf1df68105559483089f2c411dec3c09b18a02ba469",
+  "contracts/strategy-spec.yaml": "dfa8678404cedb581ed6e41eb178692493914890b14f8d4a9b4fece508e55e6e",
+  "desktop/ayesha/backtest/asof.py": "11b84eb00208d393c7973fd8e2ae2d69f50cbf884fb48bbd2485b4e7aa387e26",
+  "desktop/ayesha/backtest/inputs.py": "1654412c047a56f7e98a6c4ddd5972af1220079063622386a93230b30a593bec",
+  "desktop/ayesha/backtest/replay.py": "eee0dc7b4350a11c7128b0806040bfc762b6be32fa85118c13796e97dbd88c05",
+  "desktop/ayesha/backtest/report.py": "7040b715415fc28ab2eee87e43673bafab054e0244df9adcea39e4be1f793586",
+  "desktop/ayesha/broker.py": "5f449a2b86048d3d9fbf3a38f4b6c423e5bf47460eb17b9e8a03558e61e81c2e",
+  "desktop/ayesha/capital.py": "3d1bebaa80f81523adacda9d3a2ef7eb20966722ecf3d1a2b44f51f1ffb86c74",
+  "desktop/ayesha/config.py": "8eb3faa1b3db490e5f720d376f9d4be4ee9ee40e3b3b0ad115971027517ea4bf",
+  "desktop/ayesha/credentials.py": "fcc202f5679d68d7294b40ed58ee58f2d6ca775b0b9648406152b532e475613a",
+  "desktop/ayesha/delivery/notify.py": "ffa947d4a1c9d7fd61854e4c0cfdca9db088a834b8fae492115f3756a531e015",
+  "desktop/ayesha/delivery/push.py": "7fc6c4b7fea3bf496e896ea3ee024247e0417d9c4bda7bfcff44b46440756d1e",
+  "desktop/ayesha/doctor.py": "e0d98d7b55fb31053d6f24b844e38c637185f387dcdd95abe50115769f71976b",
+  "desktop/ayesha/feed/csv_feed.py": "8593ef9b2aeaa7fe7265f6f228cad2100eeace0253676858d7f4642b8470b300",
+  "desktop/ayesha/feed/mt5_feed.py": "13efc4e0ad186403e6579ff2a6cb959a49314ed52f1b7d3df722c9093caf08c8",
+  "desktop/ayesha/feed/oanda_feed.py": "1ecf6526c11b14e0f42a840b1f7aa4899dd10e93732baacd0d6c10fd1cc5ed27",
+  "desktop/ayesha/feed/static_specs.py": "1f7d87b72cb00b92c6d49aae58d2d8c78995ad5e2b089c3c48a6f1200f0165bc",
+  "desktop/ayesha/models.py": "85362dfdf8970b233a874ee8c40ad443384b28a20fd2c5151d6ea4fa5207a73a",
+  "desktop/ayesha/news/analysis.py": "02eedbc449bc73340f3725129a630245203d2152476a9449901d90209b8e6511",
+  "desktop/ayesha/news/calendar.py": "21ef2d883e87c78d9c6c30378175233630094d59a03b3a58a8b67b278bf90735",
+  "desktop/ayesha/news/classify.py": "8e15336715865ea628d049ee0481bf03d5419e680f11bccf80602259c40444f2",
+  "desktop/ayesha/news/ff_feed.py": "c871f041f40d7964ec0e3959ba83c2dc2ebbe5815a4cd3b5080b700b342b483e",
+  "desktop/ayesha/news/guard.py": "90557519a3c334ebf010efeab742d2d713a5df5df7e1c7901f039254272816ca",
+  "desktop/ayesha/news/ledger.py": "cc1a36041060cd04cc6428c108614c1b145e22c2d88814a5684d84eabd7a9086",
+  "desktop/ayesha/paths.py": "cafd36dc9328501aacd43e9756a85b39c6d628b8aacffab022ba61dfe0d0005b",
+  "desktop/ayesha/risk/engine.py": "d16aae4f4560ca86b6dc34fd46c1d68d67d56ce550ed1bef5d9945eb73e6f616",
+  "desktop/ayesha/rules/mtf.py": "6372cb358783d541b24b07d66c0146daaf910b49c43e7b734c89f18e7e29f2ed",
+  "desktop/ayesha/rules/primitives.py": "c76d2847af1272fd68da9d15d8d9a32ab36b10b06bd72bde49000be29a6e806d",
+  "desktop/ayesha/rules/strategy.py": "e30f1d9577f08cf46312e758e8aab8b4c163735f922a27f486b8131f0434044f",
+  "desktop/ayesha/scanner.py": "ffd87fb00c131129f61db3aeff07951907a7f50eb38c69f8dd8c779bf0d29f8b",
+  "desktop/ayesha/sessions.py": "2811c1f59b4ec37d221253a19383f7ba20742da3bb5fe9ad0b20814e9fb21606",
+  "desktop/ayesha/signing.py": "00cd9d041945a00428e13aba64d670a138eebdd2ff0ee07346a3ff4a11219c70",
+  "desktop/ayesha/storage/db.py": "5b3638b2cedbbd66e9c2b90cb07e663d2aa668dc7d1727e23dd594a694533f88",
+  "desktop/windows/backtest-local.bat": "91ade91e3dcc40e881cbe1d75584f026044fed1d185a1b84b0237f5d1779724a",
+  "desktop/windows/install.bat": "88b5acd1733e82cc5c81bf39bd2310e8aa2a28e10621b780a0e2f53ddf1e8ef5",
+  "desktop/windows/make-signing-key.bat": "474f350835dc3adba9a9942def19601772e83dc35a2c59f9128f80443f94be15",
+  "desktop/windows/run-scanner.bat": "4374696f3dca1ab41eb0a4d2d6d36315d599b4ce9a18dcab5f4e61297c22b240",
+  "desktop/windows/start-ayesha.bat": "ce57d75f4892f53107827c3b0756f3676b5ba082e8cae7ef724287dbe8438544",
+  "tradingview/AyeshaSmartMoney.pine": "46ef4a4fb8f141f764bfe35ee7d2faa58f8637fbac2c5fa7e95885e2ce5819e4"
+ },
+ "replay": {
+  "m15_equity_25_standard": {
+   "by_status": {
+    "BLOCKED": 2,
+    "CLOSED": 5,
+    "EXPIRED": 10,
+    "MISSED": 3
+   },
+   "closed": 5,
+   "rejections": 286,
+   "sha256": {
+    "rejections": "de9da1c882fb116e7669f4100cee564ef9f972f8f70558ff303ac597e887889c",
+    "trades": "43811aee04248b3a0d958fee8a921de9d077943ca4f41ea85d938e458b404f23"
+   },
+   "total_r": -3.98,
+   "trades": 20
+  },
+  "m15_from_m5_news_legacy": {
+   "by_status": {
+    "CLOSED": 2,
+    "EXPIRED": 8,
+    "MISSED": 3
+   },
+   "closed": 2,
+   "rejections": 293,
+   "sha256": {
+    "rejections": "b585942a8677d546040198668bd2621a48c9607bf4d3dd9b60ef97572804de61",
+    "trades": "fdf0ead0084abe411b71e47ae38b2bad423c9eb750d0b9046e7aaa7168c1f147"
+   },
+   "total_r": 1.49,
+   "trades": 13
+  },
+  "m15_from_m5_news_upgraded": {
+   "by_status": {
+    "BLOCKED": 1,
+    "CLOSED": 1,
+    "EXPIRED": 8,
+    "INVALIDATED": 1,
+    "MISSED": 2
+   },
+   "closed": 1,
+   "rejections": 293,
+   "sha256": {
+    "rejections": "b585942a8677d546040198668bd2621a48c9607bf4d3dd9b60ef97572804de61",
+    "trades": "a6593ad51b9fb31c4aeb3430f28448c12499b76f48cef1147539df27e7876b7b"
+   },
+   "total_r": -0.99,
+   "trades": 13
+  },
+  "m15_news_none": {
+   "by_status": {
+    "BLOCKED": 2,
+    "CLOSED": 5,
+    "EXPIRED": 10,
+    "MISSED": 3
+   },
+   "closed": 5,
+   "rejections": 286,
+   "sha256": {
+    "rejections": "de9da1c882fb116e7669f4100cee564ef9f972f8f70558ff303ac597e887889c",
+    "trades": "43811aee04248b3a0d958fee8a921de9d077943ca4f41ea85d938e458b404f23"
+   },
+   "total_r": -3.98,
+   "trades": 20
+  }
+ },
+ "scanner": {
+  "equity_100000_news_schedule": {
+   "first_signal_ids": [
+    "085d382fa355213f",
+    "20ac2df1876a4ede",
+    "28c9923cc879f1b6"
+   ],
+   "messages": {
+    "HB": 11599,
+    "NEWS": 144,
+    "SIGNAL": 19
+   },
+   "sha256": {
+    "deliveries": "465b1d163efcb5e364535a490dad08b0b8e9b329f508c782c98f40fc506a76a1",
+    "engine_health": "a4f075212a8e675173fd2a90878881b23f7a3c6189620f8323f5b6d1b3ae67aa",
+    "payloads": "256fe364e00c3e42184162dae18f25914ca3bff946d417ce33d8597d9e7ca6ee",
+    "signal_events": "833ce257596acc064dfcf3e9ca93ba2a45dfecb85c75ee5e753172702fabbe12",
+    "signals": "78ae36327a3ad46d9a0f1e908cbe8e271e582608752b2da5dc34585df7bfe3c9",
+    "signed_messages": "d415df4bebd3c1df0975b0245b7f8907034d798ea8a25838af3c985d72c083a1"
+   },
+   "signals": 19,
+   "status_counts": {
+    "EXPIRED": 8,
+    "MISSED": 2,
+    "NO_TRADE": 4,
+    "OBSERVED_SL": 5
+   }
+  },
+  "equity_100000_no_news": {
+   "first_signal_ids": [
+    "085d382fa355213f",
+    "20ac2df1876a4ede",
+    "28c9923cc879f1b6"
+   ],
+   "messages": {
+    "HB": 11599,
+    "SIGNAL": 19
+   },
+   "sha256": {
+    "deliveries": "a5c54a35291b353df4c2747603118d3c2a1a85b0cb75d5ac7cbb754617cef9a8",
+    "engine_health": "a4f075212a8e675173fd2a90878881b23f7a3c6189620f8323f5b6d1b3ae67aa",
+    "payloads": "a3996251f05a04ba0f3aed30c3c628f9c460de08dbcf2f365f32ab6b25459722",
+    "signal_events": "d93c76f164f5abf70d98748d41b98615edf69382ffe0edd9c11338543860fd43",
+    "signals": "151a1eba844640dba49bdddf67c2ca229c9bd1e0f9c5468bdcb426e2a6a5ab8c",
+    "signed_messages": "ccf14e9c33ad9368d633356ac20590538d706ef18bc2624c9780f29498a9a7ae"
+   },
+   "signals": 19,
+   "status_counts": {
+    "EXPIRED": 9,
+    "MISSED": 2,
+    "NO_TRADE": 2,
+    "OBSERVED_SL": 6
+   }
+  },
+  "equity_20_no_news": {
+   "first_signal_ids": [
+    "085d382fa355213f",
+    "20ac2df1876a4ede",
+    "28c9923cc879f1b6"
+   ],
+   "messages": {
+    "HB": 11599,
+    "SIGNAL": 19
+   },
+   "sha256": {
+    "deliveries": "7212b917a1d2829b1d2d87f6f40e057b892448402c847bc65b9415ccccd465e7",
+    "engine_health": "a4f075212a8e675173fd2a90878881b23f7a3c6189620f8323f5b6d1b3ae67aa",
+    "payloads": "75689aacfbfc2944ca4364ad8d38254d039471d08278233f7c999b04710e988a",
+    "signal_events": "31183251a321f1fde7922a7a925d355eab1b7b7e4294d55e54fbd6e964baeb92",
+    "signals": "9b9821a620582f8183019cac1648d8f85a19aaf36de562cf8cc24ac7e0881b3b",
+    "signed_messages": "1a53e9bdae7ecf90708e9baa697499db8451b073223e0ec63371aab52b09f80e"
+   },
+   "signals": 19,
+   "status_counts": {
+    "NO_TRADE": 19
+   }
+  }
+ },
+ "strategy": {
+  "hash": "9bb5e8ed5937",
+  "version": "0.4.0"
+ }
+}
