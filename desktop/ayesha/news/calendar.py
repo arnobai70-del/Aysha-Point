@@ -2,7 +2,9 @@
 
 CSV columns: time_utc,currency,impact,title   (impact: HIGH | MEDIUM | LOW)
 Optional CSV columns (only when a permitted source really supplies them):
-    forecast,previous,actual,actual_published_utc,revised_previous,state
+    forecast,previous,actual,actual_published_utc,revised_previous,state,observed_utc
+`observed_utc` is when this record was first seen in the source (a point-in-time snapshot); replays
+never show a row before that time (ayesha.backtest.asof).
 Coverage is explicit: outside [coverage_start, coverage_end] the status is UNKNOWN,
 which blocks trades in strict mode. Never treat a missing calendar as "no news".
 
@@ -80,7 +82,8 @@ class NewsCalendar:
                                      state=st if st in STATES else "CONFLICT",
                                      forecast=_opt(row.get("forecast")), previous=_opt(row.get("previous")),
                                      actual=_opt(row.get("actual")), actual_published_at=pub,
-                                     revised_previous=_opt(row.get("revised_previous"))))
+                                     revised_previous=_opt(row.get("revised_previous")),
+                                     fetched_at=_ts(row["observed_utc"]) if _opt(row.get("observed_utc")) else None))
         if not evs:
             raise ValueError("Calendar file has no events; coverage cannot be established")
         day = timedelta(days=1)

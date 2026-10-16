@@ -207,16 +207,26 @@ def cmd_report(a) -> int:
     from ayesha.backtest.report import build_report, to_markdown
     from ayesha.news.calendar import NewsCalendar
 
+    from ayesha.backtest.replay import NEWS_MODES
+
     spec = load_spec(a.spec)
     d = Path(a.data_dir)
     pairs = [x.strip().upper() for x in (a.pairs or ",".join(spec["pairs"]["enabled"])).split(",") if x.strip()]
     modes = [m.strip() for m in a.modes.split(",") if m.strip()]
-    cal = None
+    news_modes = [m.strip() for m in (getattr(a, "news_modes", None) or ",".join(NEWS_MODES)).split(",") if m.strip()]
+    if any(m not in NEWS_MODES for m in news_modes):
+        print(f"unknown news mode in {news_modes} (use {', '.join(NEWS_MODES)})")
+        return 2
+    cal, cal_sha = None, None
     if a.news:
+        import hashlib
+
         n = spec["news"]
         cal = NewsCalendar.from_csv(a.news, before_min=n["block_minutes_before"], after_min=n["block_minutes_after"],
                                     impacts=tuple(n["impacts_blocked"]))
-    results, missing = {}, []
+        cal_sha = hashlib.sha256(Path(a.news).read_bytes()).hexdigest()
+    strictest = next((m for m in ("upgraded", "legacy", "none") if m in news_modes), "none")
+    results, comparisons, missing = {}, {}, []
     for pair in pairs:
         point = 0.001 if pip_size_for(pair) == 0.01 else 0.00001
         for mode in modes:
@@ -235,18 +245,28 @@ def cmd_report(a) -> int:
                 continue
             candles = load_candles(f, point)
             sp["strategy_hash"] = spec["strategy_hash"]
-            results[f"{pair}|{mode}"] = run_backtest(pair, candles, sp, calendar=cal, account_type=a.account_type,
-                                                     usd_rates=APPROX_USD_RATES)
-            print(f"{pair} {mode}: {len(candles)} bars, {len(results[f'{pair}|{mode}']['trades'])} signals")
+            key = f"{pair}|{mode}"
+            if cal is None:
+                results[key] = run_backtest(pair, candles, sp, account_type=a.account_type, usd_rates=APPROX_USD_RATES)
+            else:
+                f5 = d / f"{pair}_M5.csv"  # closed M5 bars for the upgraded guard's post-news stability check
+                m5 = load_candles(f5, point) if mode == "m15" and f5.exists() else None
+                comparisons[key] = {nm: run_backtest(pair, candles, sp, calendar=cal, news_mode=nm, m5_candles=m5,
+                                                     account_type=a.account_type, usd_rates=APPROX_USD_RATES)
+                                    for nm in news_modes}
+                results[key] = comparisons[key][strictest]
+            print(f"{pair} {mode}: {len(candles)} bars, {len(results[key]['trades'])} signals")
     if not results:
         print("No data files found. Export first, e.g.: ayesha export --feed oanda --symbol EURUSD --tf M15 "
               f"--days 1095 --out {d / 'EURUSD_M15.csv'}")
         return 1
     split = datetime.fromisoformat(a.split).replace(tzinfo=timezone.utc) if a.split else None
-    rep = build_report(results, spec, split_at=split, folds=a.folds, data_label=a.label, usd_rates=APPROX_USD_RATES)
+    rep = build_report(results, spec, split_at=split, folds=a.folds, data_label=a.label, usd_rates=APPROX_USD_RATES,
+                       comparisons=comparisons or None)
     rep["missing_files"] = missing
-    if cal is None:
-        rep["notes"].append("No news calendar given: news lockout NOT modelled; live strict mode blocks more setups.")
+    if cal is not None:
+        rep["news"]["calendar_file"] = Path(a.news).name
+        rep["news"]["calendar_sha256"] = cal_sha
     md = to_markdown(rep)
     if a.out:
         Path(a.out).write_text(json.dumps(rep, indent=2, default=str), encoding="utf-8")
@@ -465,7 +485,11 @@ def cmd_backtest_run(a) -> int:  # export part needs network; validation is test
     except InvalidInput as e:
         print(f"INVALID INPUT: {e}")
         return EXIT_CONFIG
-    print(f"pairs={','.join(prm.pairs)} days={prm.days} split={prm.split} folds={prm.folds}")
+    if a.news and not (Path(a.news).is_file() and Path(a.news).suffix.lower() == ".csv"):
+        print("INVALID INPUT: news: give an existing .csv calendar file")
+        return EXIT_CONFIG
+    print(f"pairs={','.join(prm.pairs)} days={prm.days} split={prm.split} folds={prm.folds}"
+          + (f" news={Path(a.news).name}" if a.news else " news=NOT MODELLED"))
     if a.validate_only:
         return 0
     end = datetime.now(timezone.utc)
@@ -484,7 +508,7 @@ def cmd_backtest_run(a) -> int:  # export part needs network; validation is test
             save_candles(data / f"{pair}_{tf}.csv", bars, point)
             print(f"{pair} {tf}: {len(bars)} closed bars")
     label = f"OANDA v20 {a.oanda_env} BID bars, {prm.days} days to {end:%Y-%m-%d} (exported {end:%Y-%m-%d %H:%M} UTC)"
-    ns = Namespace(spec=a.spec, data_dir=str(data), pairs=",".join(prm.pairs), modes="m15,m5confirm", news=None,
+    ns = Namespace(spec=a.spec, data_dir=str(data), pairs=",".join(prm.pairs), modes="m15,m5confirm", news=a.news,
                    split=prm.split.isoformat(), folds=prm.folds, label=label, account_type=a.account_type,
                    out=str(out / "backtest-report.json"), md=str(out / "backtest-report.md"))
     rc = cmd_report(ns)
@@ -804,7 +828,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--data-dir", required=True, help="folder with <PAIR>_M15.csv and/or <PAIR>_M5.csv")
     s.add_argument("--pairs", help="comma list (default: enabled pairs)")
     s.add_argument("--modes", default="m15,m5confirm", help="m15 = M15 setup only; m5confirm = wait for M5 confirmation")
-    s.add_argument("--news", help="historical calendar CSV (time_utc,currency,impact,title)")
+    s.add_argument("--news", help="historical calendar CSV (time_utc,currency,impact,title[,observed_utc,...])")
+    s.add_argument("--news-modes", default="none,legacy,upgraded",
+                   help="with --news: news modes compared on the same candles (none, legacy 30/30, upgraded)")
     s.add_argument("--split", help="in-sample / out-of-sample split date, e.g. 2025-01-01")
     s.add_argument("--folds", type=int, default=4)
     s.add_argument("--label", default="UNLABELLED data", help="data source description shown in the report")
@@ -831,6 +857,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out-dir", help="default: <AyeshaFX home>/backtest/<timestamp>")
     s.add_argument("--oanda-env", default="practice", choices=["practice", "live"])
     s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
+    s.add_argument("--news", help="optional historical calendar CSV you are allowed to use (enables the news comparison)")
     s.add_argument("--validate-only", action="store_true")
     s.set_defaults(fn=cmd_backtest_run)
 

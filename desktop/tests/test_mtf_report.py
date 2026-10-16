@@ -175,10 +175,13 @@ def test_report_on_synthetic_data_is_labelled(spec):
         == s["signals"]
     assert len(run["walk_forward"]["folds"]) == 3
     assert sum(f["signals"] for f in run["walk_forward"]["folds"]) == s["signals"]
-    assert {r["equity_usd"] for r in run["capital_exness_standard"]} == {20.0, 25.0, 30.0}
+    # News spec P2: the same feasibility table from $20 to $5,000 (adaptive capital, no fixed ceiling)
+    assert {r["equity_usd"] for r in run["capital_exness_standard"]} == {20.0, 25.0, 30.0, 100.0, 500.0, 1000.0, 5000.0}
     md = to_markdown(rep)
     assert "SYNTHETIC" in md and "too small" in md.lower() or rep["overall"]["sample_ok"]
     assert not run["news_modelled"] and "| NO |" in md
+    # I03: no calendar => the report says news was not modelled and the comparison was not run
+    assert not rep["news"]["modelled"] and "NOT RUN (BLOCKED BY DATA)" in md and "NEWS DIRECTION NOT BACKTESTED" in md
 
 
 def test_capital_feasibility_respects_min_lot(spec):

@@ -7,31 +7,45 @@ Conservative choices: if a bar touches both stop and target, the stop wins; a fi
 can stop out but cannot take profit; gaps through the stop exit at the bar open;
 stop exits pay extra slippage. Open trades are closed before the New York rollover.
 Results are in R (1R = planned loss incl. spread and slippage buffer), not money.
+
+News (`news_mode`), on the same candles and the same signals:
+- "none": news not modelled (research only; live strict mode would block these).
+- "legacy": the v0.7 fixed window, HIGH impact 30 min before/after, checked at the signal bar.
+- "upgraded": the live NewsGuard on a point-in-time calendar (ayesha.backtest.asof) with closed M5
+  bars only up to each decision: tiers, overlaps, reaction watch, a setup expiring before the next
+  lockout, and a pending order cancelled when news turns against it (N10).
+News direction is never used and never backtested.
 """
 
 from __future__ import annotations
 
+import bisect
 import math
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
+from ayesha.backtest.asof import AsOfCalendar
 from ayesha.models import AccountState, Candle
 from ayesha.feed.static_specs import assumed_fx_spec
 from ayesha.news.calendar import NewsCalendar
+from ayesha.news.guard import NewsAssessment, NewsGuard
 from ayesha.risk.engine import RiskConfig, TradeProposal, evaluate
 from ayesha.rules.mtf import MtfEngine
 from ayesha.rules.strategy import TF_MINUTES, Signal
 
 NY = ZoneInfo("America/New_York")
 FLAT_TIME = time(16, 45)
+NEWS_MODES = ("none", "legacy", "upgraded")
+M5 = timedelta(minutes=5)
 
 
 @dataclass
 class Trade:
     signal: Signal
-    status: str = "PENDING"  # PENDING | PENDING_MARKET | OPEN | CLOSED | MISSED | EXPIRED | BLOCKED | UNCONFIRMED
+    # PENDING | PENDING_MARKET | OPEN | CLOSED | MISSED | EXPIRED | BLOCKED | UNCONFIRMED | INVALIDATED
+    status: str = "PENDING"
     fill_index: int | None = None
     fill_price: float | None = None
     exit_index: int | None = None
@@ -40,20 +54,45 @@ class Trade:
     blockers: list[str] = field(default_factory=list)
     planned_loss: float = 0.0
     fill_time: datetime | None = None
+    exit_time: datetime | None = None  # close of the exit bar
+    expires_at: datetime | None = None  # pending order cancelled before a bar that would end after this
+    news_phase: str = "NOT_MODELLED"  # upgraded-guard phase at the signal (also annotated in other modes)
 
 
 def _after_flat_time(t: datetime) -> bool:
     return t.astimezone(NY).time() >= FLAT_TIME
 
 
+def bar_source(bars: list[Candle], minutes: int = 5) -> Callable[[datetime, datetime], list[Candle]]:
+    """Bars with lo <= open time that have CLOSED by `hi`. Never returns a bar from after `hi`."""
+    bars = sorted(bars, key=lambda b: b.time)
+    times = [b.time for b in bars]
+    width = timedelta(minutes=minutes)
+
+    def get(lo: datetime, hi: datetime) -> list[Candle]:
+        return bars[bisect.bisect_left(times, lo):bisect.bisect_right(times, hi - width)]
+    return get
+
+
+def _phase_code(phase: str) -> str:
+    return phase if phase.startswith("NEWS_") else "NEWS_" + phase
+
+
 def run_backtest(symbol: str, candles: list[Candle], spec: dict[str, Any], *,
-                 calendar: NewsCalendar | None = None, equity_usd: float | None = None,
+                 calendar: NewsCalendar | None = None, news_mode: str | None = None,
+                 m5_candles: list[Candle] | None = None, equity_usd: float | None = None,
                  account_type: str = "Standard", usd_rates: dict[str, float] | None = None) -> dict[str, Any]:
-    """`candles` are closed bars of the engine's base timeframe: M15, or M5 when M5 confirmation is on."""
+    """`candles` are closed bars of the engine's base timeframe: M15, or M5 when M5 confirmation is on.
+    `m5_candles` feed the upgraded guard's post-news stability check (default: `candles` when they are M5)."""
+    mode = news_mode or ("legacy" if calendar is not None else "none")
+    if mode not in NEWS_MODES:
+        raise ValueError(f"news_mode must be one of {NEWS_MODES}")
+    if mode != "none" and calendar is None:
+        raise ValueError(f"news_mode {mode!r} needs a historical calendar")
     eng = MtfEngine(symbol, spec)
     cfg = RiskConfig.from_spec(spec)
-    if calendar is None:
-        # No calendar => news is NOT modelled. Report says so; strict gate is relaxed for research only.
+    if mode == "none":
+        # News is NOT modelled. Report says so; strict gate is relaxed for research only.
         cfg = RiskConfig(**{**cfg.__dict__, "strict_news": False})
     pip = eng.strat.pip
     slip = cfg.slippage_buffer_pips * pip
@@ -62,18 +101,47 @@ def run_backtest(symbol: str, candles: list[Candle], spec: dict[str, Any], *,
     awaiting: dict[str, Trade] = {}
     capital_checks: list[list[str]] = []
 
-    def gate(sig: Signal, c: Candle) -> tuple[list[str], list[str] | None]:
-        news = "CLEAR"
-        if calendar is not None:
-            news, _ = calendar.status(symbol, sig.bar_close_utc)
-            if news == "CLEAR" and sig.score_breakdown.get("news_integrity", 0) == 0:
-                sig.score_breakdown["news_integrity"] = 5
-                sig.score += 5
+    guard = asof = None
+    m5 = None
+    if calendar is not None:
+        guard, asof = NewsGuard(spec), AsOfCalendar(calendar)
+        src = m5_candles if m5_candles is not None else (candles if eng.base_tf == "M5" else None)
+        m5 = bar_source(src) if src else None
+    seen: dict[datetime, NewsAssessment] = {}
+    decision_times: list[datetime] = []
+
+    def news_at(t: datetime) -> NewsAssessment:
+        """Upgraded guard at `t`: the calendar as known then and M5 bars closed by then."""
+        if t not in seen:
+            decision_times.append(t)
+            seen[t] = guard.assess(symbol, t, asof.at(t), m5=m5, pip=pip, live=False)
+        return seen[t]
+
+    def gate(sig: Signal, c: Candle, tr: Trade) -> tuple[list[str], list[str] | None]:
+        t = sig.bar_close_utc
+        news, extra = "CLEAR", []
+        na = news_at(t) if guard is not None else None
+        if na is not None:
+            tr.news_phase = na.phase
+        if mode == "legacy":
+            news, _ = asof.at(t).status(symbol, t)  # same point-in-time view, legacy fixed window
+        elif mode == "upgraded":
+            news = na.status
+            if not na.allows_entry:
+                extra = [_phase_code(na.phase)] + [r for r in na.reasons if r != na.phase]
+            elif na.next_block_start is not None:
+                tr.expires_at = na.next_block_start  # the order must be gone before the next lockout
+                if na.next_block_start - t < tf:
+                    extra = ["NEWS_LOCKOUT_BEFORE_EXPIRY"]
+        if mode != "none" and news == "CLEAR" and sig.score_breakdown.get("news_integrity", 0) == 0:
+            sig.score_breakdown["news_integrity"] = 5
+            sig.score += 5
         prop = TradeProposal(symbol, sig.direction, sig.entry, sig.stop, sig.targets, sig.spread, sig.atr,
                              0.0, True, news)
         inst = assumed_fx_spec(symbol, c.close, account_type, usd_rates)
         # sizing-independent gates (news, spread, stop tightness, RR) at a notional large equity
         blockers = evaluate(prop, inst, AccountState(equity_usd=1e6), cfg, live=False).blockers
+        blockers += [b for b in extra if b not in blockers]
         cap = evaluate(prop, inst, AccountState(equity_usd=equity_usd), cfg, live=False).blockers \
             if equity_usd is not None else None
         return blockers, cap
@@ -82,17 +150,28 @@ def run_backtest(symbol: str, candles: list[Candle], spec: dict[str, Any], *,
         # 1) manage existing orders on this bar (created on earlier bars only)
         for t in trades:
             if t.status == "PENDING":
+                if mode == "upgraded":
+                    na = news_at(c.time)  # what was known when this bar opened (N10)
+                    if not na.allows_entry:
+                        t.status = "INVALIDATED"
+                        t.blockers = ["INVALIDATED", _phase_code(na.phase)] + [r for r in na.reasons if r != na.phase]
+                        continue
+                if t.expires_at is not None and c.time + tf > t.expires_at:
+                    t.status, t.exit_reason = "EXPIRED", "NEWS_LOCKOUT_BEFORE_EXPIRY"
+                    continue
                 _pending(t, c, i, slip)
             elif t.status == "PENDING_MARKET":
                 _market(t, c, i, slip)
             elif t.status == "OPEN":
                 _open(t, c, i, slip, tf)
+            if t.status == "CLOSED" and t.exit_time is None:
+                t.exit_time = c.time + tf
         # 2) the engine sees the closed bar and may propose, confirm or drop setups
         for ev in eng.on_bar(c):
             sig = ev.signal
             if ev.kind == "SETUP":
-                blockers, cap = gate(sig, c)
                 tr = Trade(sig, planned_loss=abs(sig.entry - sig.stop) + sig.spread + slip)
+                blockers, cap = gate(sig, c, tr)
                 if blockers:
                     tr.status, tr.blockers = "BLOCKED", blockers
                 elif ev.needs_confirmation:
@@ -109,9 +188,9 @@ def run_backtest(symbol: str, candles: list[Candle], spec: dict[str, Any], *,
                 tr = awaiting.pop(sig.signal_id, None)
                 if tr is None:
                     continue
-                blockers, cap = gate(sig, c)  # re-check gates at the refined entry
                 tr.signal = sig
                 tr.planned_loss = abs(sig.entry - sig.stop) + sig.spread + slip
+                blockers, cap = gate(sig, c, tr)  # re-check gates at the refined entry
                 if cap is not None:
                     capital_checks.append(cap)
                 if blockers:
@@ -123,7 +202,10 @@ def run_backtest(symbol: str, candles: list[Candle], spec: dict[str, Any], *,
         if t.status in ("PENDING", "OPEN", "PENDING_MARKET", "AWAITING_CONFIRMATION"):
             t.status, t.exit_reason = "UNRESOLVED_END_OF_DATA", "END"
     return {"symbol": symbol, "trades": trades, "rejections": eng.rejections,
-            "capital_checks": capital_checks, "news_modelled": calendar is not None,
+            "capital_checks": capital_checks, "news_modelled": mode != "none", "news_mode": mode,
+            "news_integrity": asof.integrity(decision_times) if asof is not None else None,
+            "news_stability_bars": "M5 closed bars" if m5 is not None else (
+                "none: reaction watch held to its maximum" if guard is not None else None),
             "base_timeframe": eng.base_tf, "confirm_timeframe": eng.confirm_tf,
             "bars": len(candles), "start": candles[0].time if candles else None,
             "end": candles[-1].time if candles else None}
