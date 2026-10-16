@@ -1,4 +1,4 @@
-# Master plan section Z: checklist with evidence (release 0.7.0)
+# Master plan section Z: checklist with evidence (release 0.8.0)
 
 Source: [master plan section Z](AYESHA_AI_FOREX_TRADING_ASSISTANT_MASTER_PLAN.md). Status words:
 **DONE** = built and proven by an automated test or a committed file (evidence named) ·
@@ -13,8 +13,8 @@ Test names refer to `desktop/tests/*.py` (Python) and `android/app/src/test/.../
 | GitHub repository URL and access | DONE | github.com/arnobai70-del/Aysha-Point, push to `main` allowed by owner |
 | OS version and PC hardware/network | OWNER | Windows assumed; not confirmed |
 | Android 13 handset compatibility, install method | OWNER | APK sideload; device not tested (AT-19) |
-| Account base currency USD, equity input format | PARTIAL | USD assumed; equity typed in `install.bat` / phone settings |
-| Exness Standard contract settings from terminal | CHANGED/OWNER | No MT5: owner types values from the Exness app (`confirm-broker`) |
+| Account base currency USD, equity input format | PARTIAL | Equity typed with `ayesha capital` / phone Update capital, USD or USC for Cent (`test_c03_cent_and_standard_are_distinct_and_oanda_balance_is_never_used`); USD base currency still assumed, not confirmed by the owner |
+| Exness Standard contract settings from terminal | CHANGED/OWNER | No MT5: owner types values from the Exness app per pair (`confirm-broker`, `test_c04_broker_spec_is_per_symbol`) |
 | Broker platform / legal data adapter | CHANGED | MT5 optional; OANDA v20 practice API is the data source |
 | TradingView Basic indicator/alert entitlements | OWNER | Official pricing lists no technical alerts on Basic; owner attempt pending (AT-01) |
 | Eligible realtime authorized feed and cost | PARTIAL | OANDA practice token, free; owner has not created one yet |
@@ -34,7 +34,7 @@ Test names refer to `desktop/tests/*.py` (Python) and `android/app/src/test/.../
 | CI: Android unit/build | DONE | `build-android` workflow runs JVM tests and builds the APK |
 | CI: Pine static check | DONE | `generate_pine.py --check`, `test_pine_alert_payload_matches_phone_parser` |
 | Dependency lockfiles, vulnerability scanning | OPEN | |
-| Secrets scan | PARTIAL | No secrets in the repo by design; no dedicated scanner job |
+| Secrets scan | DONE | `scripts/check_no_secrets.py` in the CI step "Workflow and secret hygiene" (OANDA-token shape, private keys, keystores, GitHub/AWS/Telegram tokens) |
 | Release tag/changelog/versioning | DONE | `contracts/version.json`, `test_version_manifest_matches_components`, release tag `android-v<ver>-b<run>` |
 | Docs + checklist updated per feature commit | PARTIAL | Done for each release; not enforced by CI |
 
@@ -44,7 +44,7 @@ Test names refer to `desktop/tests/*.py` (Python) and `android/app/src/test/.../
 | Approved data connector authenticated locally | OWNER | OANDA adapter built; owner token pending (AT-02) |
 | Read-only adapter (no order calls) | DONE | `check_no_order_api.py` (MT5, Pine strategy, OANDA write endpoints) |
 | Stable symbol alias mapping | DONE | `test_mt5_adapter_is_read_only_and_resolves_suffix`, OANDA `EUR_USD` mapping |
-| Contract size/min/step/max per symbol | PARTIAL | Assumed until owner confirms; READY blocked until then (`test_ready_guard_blocks_unverified_contract`) |
+| Contract size/min/step/max per symbol | PARTIAL | Per pair since 0.8.0; assumed until the owner confirms each pair, READY blocked until then (`test_ready_guard_blocks_unverified_contract`, `test_c04_broker_spec_is_per_symbol`) |
 | USD pip value for cross/JPY | DONE | risk tests, Kotlin `unknownInstrumentsFailClosed` |
 | Bid/ask/spread and quote timestamps | DONE | `test_oanda_feed_reads_bid_ask_and_skips_forming_bar` (fake HTTP) |
 | Historical data integrity / lookback | PARTIAL | Closed bars only, monotonic check; no real-data run yet |
@@ -94,11 +94,11 @@ Test names refer to `desktop/tests/*.py` (Python) and `android/app/src/test/.../
 | TP path and obstacles | PARTIAL | Target liquidity recorded; one target only |
 | Net RR with friction | DONE | risk tests; recomputed after M5 confirmation (`test_rr_rechecked_after_confirmation`) |
 | Lot floors to step, rejects below min | DONE | risk tests, Kotlin lot tests |
-| Margin / leverage | PARTIAL | Free margin checked when the feed gives it (MT5); OANDA path has none |
+| Margin / leverage | PARTIAL | Owner-typed leverage (checked at most 1:200) and free margin from the capital snapshot when trades are open (`test_c06_positions_margin_exposure_and_daily_limits`); not read from Exness |
 | Spread/slippage limit | DONE | `test_spread_floor_never_lets_feed_spread_be_tighter_than_broker` |
-| News lockout and stale calendar | DONE | news tests, live FF fetch job in CI |
+| News lockout and stale calendar | DONE | tiered state machine N01–N12 (`test_news_capital.py`), live FF fetch job in CI |
 | Daily loss / exposure / correlation | DONE | risk tests |
-| $25 account produces NO_TRADE | DONE | `test_exness_standard_small_accounts_are_no_trade`, `test_small_equity_is_no_trade` |
+| $25 account produces NO_TRADE | DONE | `test_exness_standard_small_accounts_are_no_trade`, `test_small_equity_is_no_trade`, `test_c07_min_lot_explanation_at_25_and_same_geometry_feasible_later` |
 | Duplicate, stale, missed never READY again | DONE | `test_scanner_end_to_end_no_duplicates`, AT-32, AT-36 |
 | Manual outcomes: simulated vs actual | DONE (code) | Phone journal uses typed real results only (AT-39); backtests stay on the PC/CI |
 
@@ -147,8 +147,8 @@ Test names refer to `desktop/tests/*.py` (Python) and `android/app/src/test/.../
 | Watchlist | DONE (code) | Settings |
 | Inbox and filtering | DONE (code) | active / archive tabs |
 | Details with rule trace and risk status | DONE (code) | DetailActivity, MTF card |
-| Capital/risk settings | DONE (code) | SettingsCheck tests |
-| Settings sync to PC | OPEN | PC equity is typed separately (install.bat) |
+| Capital/risk settings | DONE (code) | SettingsCheck tests; Update capital with a 24 h confirmation (`phoneEquityMustBeConfirmedWithinADay`) |
+| Settings sync to PC | CHANGED | Equity is typed on both sides and compared through a digest (`CAPITAL_MISMATCH`); the amount never travels (DECISIONS 2026-10-16, C09) |
 | Risk preview refuses impossible min lot | DONE | Kotlin `smallAccountsNeverExceedBudget` |
 | TradingView deep link | DONE (code) | `parsesIndicatorAlert` URL test |
 | Canonical signal on companion chart | PARTIAL | levels copy button; no in-app chart |
@@ -187,3 +187,24 @@ Test names refer to `desktop/tests/*.py` (Python) and `android/app/src/test/.../
 | Release tags, APK, Pine included | DONE | GitHub release per build with APK SHA-256 |
 | Release hashes and rollback | PARTIAL | hashes yes; rollback = install the previous release APK (signer must match) |
 | Owner acceptance without profit claims | OWNER | |
+
+## News intelligence & adaptive capital spec v1.0 (release 0.8.0)
+Full test mapping: [VERIFICATION.md](VERIFICATION.md) (N01–N12, C01–C10, I01–I06). Decisions: [DECISIONS.md](DECISIONS.md).
+
+| Item | Status | Evidence / note |
+|---|---|---|
+| Confirm current implementation before editing (spec section 2) | DONE | 0.7.1 code read; legacy 30/30 kept as the minimum (`test_n02_tier_config_can_never_undercut_the_legacy_window`) |
+| P0 news protection: state machine, tiers, fail closed | DONE | N01–N06, N12 |
+| P0 capital as a variable, owner-entered, fail closed | DONE | C01–C03, C09 |
+| P0 per-pair contract, floor to step, hard cap, stop never narrowed | DONE | C04, C05 |
+| P0 news never bypasses capital or daily rules | DONE | C10, AT-31 |
+| P1 notices (upcoming, blocked, after the news, cancelled READY) | DONE (code) | N10, N11; phone screen PENDING OWNER |
+| P1 Update capital on PC and phone, mismatch check | DONE (code) | C09, Kotlin `capitalDigestMatchesPythonVector`; phone screen PENDING OWNER |
+| P1 conditional numbers analysis | PARTIAL | N07–N09 pass; live input BLOCKED BY DATA (no verified actuals in the Forex Factory export) |
+| P1 warnings and risk history (B4/B5) | DONE | `test_b4_*`, `test_b5_*`, doctor capital row |
+| P2 legacy vs upgraded news comparison, point-in-time | PARTIAL | Tooling and 17 tests on synthetic data; real run BLOCKED BY DATA (OANDA history and a permitted historical calendar needed) |
+| P2 capital feasibility $20–$5,000, adaptive account | PARTIAL | Tooling done (`test_report_has_adaptive_accounts_for_every_mode`); real data pending (AT-25) |
+| Protocol versioned, no silent change | DONE | wire format 4, `signal.schema.json` 1.1 (`_assert_matches_schema` in I02), `contracts/version.json` |
+| Docs and Bangla owner guide | DONE | [11-news-and-capital-guide.md](11-news-and-capital-guide.md), README, STATUS, CHANGELOG |
+| Real PC, Android 13, Pine compile, Exness specs observed (I05) | OWNER | not observed yet |
+| Forward paper period before real money (I06) | OWNER | at least 30 trading days on demo/paper (docs/11 section জ) |

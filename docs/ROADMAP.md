@@ -44,3 +44,10 @@ See `CHANGELOG.md` for details. Checklist items in the master spec are only tick
 ## 2026-10-15 re-audit v2 (release 0.6.0)
 - Canonical live path is now Mode B: PC scanner on OANDA v20 data (no MT5) → signed ntfy.sh push → Android app. TradingView stays the chart explanation; its alerts are optional (Basic has no technical alerts).
 - Next, in order: owner device/account checks (docs/STATUS.md "Owner actions"), real-data backtest from `ayesha export --feed oanda` with a reserved out-of-sample period, then 30 days of demo forward logging. No new setups until that evidence exists.
+
+## 2026-10-16 news intelligence & adaptive capital (release 0.8.0)
+- Built from the handoff spec v1.0 in its priority order: P0 news protection and owner-entered capital, P1 notices,
+  phone Update capital and warnings, P2 point-in-time news comparison tooling. Tests N01–N12, C01–C10, I01–I04 are
+  automated; I05 and I06 stay with the owner ([VERIFICATION.md](VERIFICATION.md)).
+- Still blocked: phase 3 (edge validation) needs the owner's OANDA history run, and the news comparison also needs a
+  permitted historical calendar. Then the 30-day demo forward test (phase 7). No new setups until that evidence exists.

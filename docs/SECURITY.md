@@ -1,4 +1,4 @@
-# Security notes (credentials, workflows, signing) — release 0.7.1
+# Security notes (credentials, workflows, signing, capital) — release 0.8.0
 
 The repository is **public**. Nothing secret may ever be committed; CI enforces this with
 `scripts/check_no_secrets.py` (OANDA-token shape, private keys, keystores, GitHub/AWS/Telegram tokens).
@@ -32,3 +32,21 @@ See [10-owner-testing-guide.md](10-owner-testing-guide.md) (section গ৪). Sum
 update only when the new APK has the same signing key. `ayesha make-signing-key` creates a PKCS#12
 key locally; its four values go into GitHub secrets; CI proves on every build that a key made this way
 signs the APK (`Signing self-test` step) and prints the signer SHA-256 in each release note.
+
+## Capital, broker and news data (0.8.0)
+- **Exness:** AYESHA never asks for an Exness login, password, investor password or API key and has no Exness
+  connection. Equity, open trades, free margin, leverage and contract values are typed by the owner from the Exness app.
+- **Equity stays local.** PC snapshots are in `%AYESHA_HOME%\capital.json` (default `%USERPROFILE%\AyeshaFX`), the
+  phone keeps its own value in app storage. Neither file is in the repository, a report or a workflow artifact.
+- **Relay:** the public ntfy.sh relay never sees the amount. A READY carries `CAPH`, the first 16 hex characters of
+  HMAC-SHA256(pairing code, `capital:v1:<cents>`); without the pairing code a relay reader cannot test guesses. The
+  heartbeat carries only a status code (`CAP=OK`, `CAP=STALE`, ...). Tests: `test_c09_capital_updates_reach_the_scanner_and_never_the_relay`,
+  Kotlin `capitalDigestMatchesPythonVector`.
+- **Doctor and warnings** print codes, never amounts (`test_doctor_shows_capital_warnings_as_codes_without_amounts`);
+  `ayesha capital --history` shows amounts only in the owner's own console.
+- **News:** the Forex Factory weekly export needs no key. The local event ledger (`news-ledger.json`) holds only public
+  calendar data and its provenance (`test_n12_offline_news_source_recovers_and_ledger_is_auditable` checks it holds no
+  token). No paid or licensed calendar key is used or stored; a historical calendar CSV for P2 stays on the PC
+  (`backtest-local.bat --news ...`); the report records only its file name (no folder path) and SHA-256.
+- **Orders:** news, capital and scores can only block. Nothing in the PC or phone code can place, modify or close an
+  order (`scripts/check_no_order_api.py`).

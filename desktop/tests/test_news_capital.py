@@ -155,7 +155,7 @@ def test_n03_moved_dropped_and_corrected_events_never_silently_clear(guard):
     assert sorted(e.state for e in evs) == ["CANCELLED_OR_MOVED", "RESCHEDULED"]
     c = cal(*evs, fetched=E - timedelta(minutes=30))
     a = guard.assess("EURUSD", E - timedelta(minutes=10), c)  # old time still protected
-    assert a.phase == "PRE_EVENT_LOCKOUT" and "EVENT_CANCELLED_OR_MOVED" not in a.reasons or True
+    assert a.phase == "PRE_EVENT_LOCKOUT" and "EVENT_CANCELLED_OR_MOVED" in a.reasons
     assert not a.allows_entry
     a2 = guard.assess("EURUSD", E + timedelta(minutes=60), c)  # new time lockout
     assert a2.phase == "PRE_EVENT_LOCKOUT" and "EVENT_RESCHEDULED" in a2.reasons

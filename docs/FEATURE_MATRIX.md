@@ -26,9 +26,32 @@ see bank orders; "institutional" items are price-behavior hypotheses only.
 | J setup: SWEEP_MSS_FVG (bullish/bearish) | ✅ | ✅ | the only setup today |
 | J setup: trend continuation | ❌ | ❌ | not built |
 | K risk engine, all hard gates | ✅ | ⚠️ lot estimate only | |
-| L news lockout | ✅ CSV / Forex Factory | ❌ | |
+| L news lockout | ✅ CSV / Forex Factory, tiered state machine (see below) | ❌ | Pine cannot see the calendar; the phone blocks chart candidates during a PC news window |
 | M canonical ids, states, lifecycle | ✅ | n/a | |
 | Q PC scanner without MT5 | ✅ OANDA v20 | n/a | |
 | R chart ↔ scanner parity report | ❌ | ❌ | independent calculations; app says so |
-| S validation report (IS/OOS, walk-forward, breakdowns, $ feasibility) | ✅ tooling (`ayesha report`, `backtest` workflow) | n/a | real data needs the owner's OANDA token secret |
-| O Android screens O1–O10 | ⚠️ home, inbox (active/archive), details with MTF, settings, watchlist, diagnostics, PC link, journal + statistics | | no charts in-app; no settings sync to PC |
+| S validation report (IS/OOS, walk-forward, breakdowns, $ feasibility) | ✅ tooling (`ayesha report`, `backtest` workflow), feasibility $20–$5,000, adaptive account | n/a | real data needs the owner's OANDA token (secret or `backtest-local.bat`) |
+| O Android screens O1–O10 | ⚠️ home, inbox (active/archive), details with MTF and news, settings with Update capital, watchlist, diagnostics, PC link, journal + statistics | | no charts in-app; equity is typed on both sides and compared by digest, not synced |
+
+## News intelligence & adaptive capital spec v1.0 (release 0.8.0)
+
+| Spec item | PC scanner | Phone | Notes |
+|---|---|---|---|
+| A1 three layers: protection, notices, numbers analysis | ✅ | ✅ shows all three | only protection can block; notices and analysis never open a trade |
+| A2 state machine (UPCOMING, PRE_EVENT_LOCKOUT, EVENT_LIVE, POST_EVENT_COOLDOWN, REACTION_WATCH, CLEAR, NEWS_UNVERIFIED) | ✅ `news/guard.py` | ✅ phase on READY (`NP=`) | `NEWS_UNKNOWN` of the spec maps to `NEWS_UNVERIFIED` |
+| A2 tiered windows, overlaps, strictest wins, legacy 30/30 as minimum | ✅ | n/a | `news.tiers` in the spec; research defaults, not optimized |
+| A2 reschedule / cancel / correction ledger | ✅ `news/ledger.py` | n/a | old time keeps blocking; correction opens a new window |
+| A3 post-news stability on closed M5 bars (spread, range, shock, whipsaw, gaps) | ✅ | n/a | bounded at 120 min after the window |
+| A3 READY re-checked before entry and before a retried push | ✅ `INVALIDATED` | ✅ cancel notice | |
+| A4 notices: upcoming, entries blocked, post-news summary; open-trade advice | ✅ signed `AYESHA NEWS` | ✅ news watch card on the home screen | text tells the owner to check stop-loss and gap risk; never closes a trade |
+| A5 provenance, coverage, age, clock drift | ✅ | ✅ calendar age on READY | Forex Factory weekly export only; no historical provider |
+| A5 actual vs forecast, conditional scenarios | ⚠️ code ready, live input **BLOCKED BY DATA** | ✅ shows the PC's conditional scenario text | FF export has no verified actual or publication time |
+| A5 anti-lookahead in replays | ✅ `backtest/asof.py` | n/a | rows after `observed_utc`, actuals after `actual_published_utc` |
+| B1 owner-entered Exness equity, Standard and Cent | ✅ `ayesha capital` | ✅ Update capital | never the OANDA balance, never a login |
+| B2 sizing from verified equity, floor to step, 1 % hard cap, margin at ≤1:200 | ✅ | ✅ phone lot ≤ PC lot | stop is never narrowed to fit 0.01 lot |
+| B2 per-pair Exness contract | ✅ `confirm-broker` per pair | n/a | EURUSD values never reused |
+| B3 snapshot age, open-trade confirmation, free margin, PC/phone digest | ✅ | ✅ `CAPITAL_MISMATCH` | equity never on the relay |
+| B4 deposits/withdrawals not P&L; weekly drawdown and expiry warnings | ✅ warnings only | ⚠️ PC heartbeat capital status only | warnings never block or loosen a gate |
+| B5 [Update capital] [Confirm open positions] [View risk history] | ✅ `ayesha capital`, `--positions`/`--no-positions`, `--history` | ✅ Update capital | no risk history screen on the phone yet |
+| P2 legacy 30/30 vs upgraded on the same candles, point-in-time, OOS, CIs, sample sizes | ✅ tooling | n/a | **NOT RUN on real data**: needs OANDA history and a permitted historical calendar |
+| P2 feasibility at $20/$25/$30/$100/$500/$1,000/$5,000 and adaptive account | ✅ tooling | n/a | hypothetical replay at assumed contract values, not a forecast |

@@ -4,6 +4,7 @@
 প্রতিটা ধাপের শেষে "যা দেখা উচিত" লেখা আছে। যা দেখলেন (বা ভুল কিছু) তা স্ক্রিনশটসহ জানাবেন, আমি
 [VERIFICATION.md](VERIFICATION.md)-তে প্রমাণ হিসেবে লিখে রাখব। আসল ডেটা, ফোনে পরীক্ষা আর অন্তত ৩০ দিনের ডেমো
 ফরোয়ার্ড টেস্ট ছাড়া "সিগন্যাল লাভজনক" বা "লাইভ সংযোগ সফল" বলা যাবে না।
+নিউজ সুরক্ষা আর capital (equity) আপডেটের পুরো ব্যাখ্যা: [11-news-and-capital-guide.md](11-news-and-capital-guide.md)।
 
 ---
 
@@ -15,17 +16,22 @@
    টোকেনটা কপি করে রাখুন (কাউকে দেবেন না, কোথাও পোস্ট করবেন না)।
 3. GitHub রেপো → **Code → Download ZIP** → unzip করুন (যেমন `C:\AYESHA`)।
 4. `desktop\windows\install.bat`-এ ডাবল-ক্লিক। প্রশ্নগুলো:
-   - **Token (hidden)**: টোকেন paste করে Enter (টাইপ করা অক্ষর দেখা যাবে না, এটাই ঠিক)।
-   - **Equity**: আপনার Exness ব্যালান্স USD-তে, যেমন `25`।
-   - **contract_size / volume_min / volume_step / volume_max**: Exness অ্যাপ → EURUSD → ⓘ Specification থেকে হুবহু।
-   - **Pairing code**: লিখে রাখুন (ফোনে লাগবে)।
+   - **1/5 Token (hidden)**: টোকেন paste করে Enter (টাইপ করা অক্ষর দেখা যাবে না, এটাই ঠিক)।
+   - **2/5 Capital**: Exness অ্যাপ → Accounts-এ যে **equity** দেখায়, USD-তে, যেমন `25`; তারপর খোলা ট্রেড (না থাকলে Enter)।
+   - **3/5 Exness contract per pair**: প্রথমে account leverage (যেমন `2000`, unlimited হলে `U`)। তারপর প্রতিটা পেয়ার
+     (EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, EURJPY): Exness অ্যাপ → পেয়ার → ⓘ Specification থেকে contract size, min lot,
+     step, max lot হুবহু, আর শান্ত বাজারে সাধারণ spread (pip)। পরের পেয়ারে মান একই হলে `Y` (শুধু অ্যাপে দেখে নিয়ে), আলাদা হলে
+     `N`, বাদ দিতে `S` (সেই পেয়ারে READY হবে না)।
+   - **4/5 Pairing code**: লিখে রাখুন (ফোনে লাগবে)।
    - **Start automatically?**: চাইলে `Y`।
 
 **যা দেখা উচিত:** শেষে health check-এ `OK  OANDA token`, `OK  OANDA prices` (বাজার বন্ধ থাকলে quote age বেশি দেখাবে),
-`OK  Exness contract`, `OK  Pairing code`, `OK  News calendar`। কোনো `FAIL` থাকলে লেখাটা পাঠান।
+`OK  Exness contract` (leverage সহ), `OK  Capital` (কত ঘণ্টা আগে নিশ্চিত, সংখ্যা দেখায় না), `OK  Pairing code`,
+`OK  News calendar`। কোনো `FAIL` থাকলে লেখাটা পাঠান।
 
 ### ক২. প্রতিদিন চালানো
-`desktop\windows\start-ayesha.bat` ডাবল-ক্লিক।
+`desktop\windows\start-ayesha.bat` ডাবল-ক্লিক। প্রথমে **Capital check for this session** জিজ্ঞেস করবে: Exness অ্যাপে equity
+দেখে লিখুন (একই থাকলে Enter), তারপর খোলা ট্রেড। এই নিশ্চয়তা ২৪ ঘণ্টা বৈধ (ডিপোজিট/উইথড্রর পরে ৪ ঘণ্টা)।
 **যা দেখা উচিত:** `Connected read-only ... OANDA data feed` আর প্রতি ১৫ মিনিটে নতুন বার প্রসেস।
 - ইন্টারনেট বন্ধ করলে: `FEED UNREACHABLE ... will retry`, তারপর ৬০ সেকেন্ড পর নিজে আবার চেষ্টা করবে। ইন্টারনেট ফিরলে চলবে।
 - টোকেন ভুল বা বাতিল হলে: `OANDA REJECTED THE TOKEN` লিখে থেমে যাবে (বারবার চেষ্টা করবে না)। নতুন টোকেন নিয়ে install.bat আবার চালান।
@@ -48,7 +54,8 @@
 1. TradingView → চার্ট খুলুন → **OANDA:EURUSD**, timeframe **15m** (PC-র সাথে একই feed)।
 2. নিচে **Pine Editor** → সব মুছে `tradingview/AyeshaSmartMoney.pine`-এর পুরো লেখা paste → **Add to chart**।
    **যা দেখা উচিত:** কোনো লাল error নেই; ডান-উপরে টেবিলে PAIR, SESSION, H1 BIAS, SETUP, RISK, VERSION
-   (`0.3.0 #0aa797b605f6`), TV FEED, TIMEFRAME `15m OK`, H4 CONTEXT, FEED NOTE `same feed as PC (OANDA)`।
+   (`0.4.0 #9bb5e8ed5937`), TV FEED, TIMEFRAME `15m OK`, H4 CONTEXT, FEED NOTE `same feed as PC (OANDA)`।
+   পুরনো version-এর indicator থাকলে সরিয়ে নতুনটা দিন; ফোনের অ্যাপ আর Pine একই version না হলে চার্টের সিগন্যাল UNVERIFIED হবে।
    error এলে লাইনের নম্বরসহ স্ক্রিনশট পাঠান।
 3. চার্ট পিছনে টেনে ①–④ চিহ্ন (sweep, MSS, FVG, Entry/SL/TP) খুঁজুন; একটার স্ক্রিনশট পাঠান।
 4. Basic-এ alert পরীক্ষা: ⏰ Alert → Condition: **AYESHA → Any alert() function call** → Create।
@@ -64,7 +71,9 @@
 2. ফোনের ব্রাউজারে সর্বশেষ রিলিজ থেকে `ayesha-fx.apk` নামান → খুলুন → "Install unknown apps" অনুমতি → Install।
 3. অ্যাপ খুলুন → নোটিফিকেশন অনুমতি **Allow**।
 4. "অনুমতি দিন (Notification access)" → AYESHA FX চালু। "Restricted setting" দেখালে: Settings → Apps → AYESHA FX → ⋮ → Allow restricted settings, তারপর আবার।
-5. ⚙️ Settings → equity, risk (০.৫), Exness Standard; PC link-এ pairing code লিখুন, "PC scanner থেকে সিগন্যাল নাও" টিক → Save।
+5. ⚙️ Settings → Exness equity লিখে **✅ Update capital** (PC-তে যা লিখেছেন সেই একই সংখ্যা), risk (০.৫), Exness Standard;
+   PC link-এ pairing code লিখুন, "PC scanner থেকে সিগন্যাল নাও" টিক → Save।
+   **যা দেখা উচিত:** হোমের 💰 Capital কার্ডে "শেষ নিশ্চিত: এইমাত্র"; PC থেকে সিগন্যাল এলে "✅ শেষ PC সিগন্যালের equity-র সাথে মিল আছে"।
 
 ### গ২. সংযোগ পরীক্ষা
 1. PC-তে (desktop ফোল্ডারে) `python -m ayesha.cli push-test`।
@@ -79,6 +88,8 @@
 - "TradingView-এ খুলুন" → একই পেয়ার ১৫m চার্টে খোলা উচিত। লেভেল চার্টের ①–④-এর সাথে মিলছে কিনা স্ক্রিনশট পাঠান
   (feed আলাদা হলে সামান্য পার্থক্য স্বাভাবিক)।
 - $20–30 equity-তে প্রায় সব সিগন্যাল **NO TRADE (MIN_LOT_EXCEEDS_RISK)** হবে, আর্কাইভে কারণসহ থাকবে। এটাই নিরাপদ উত্তর।
+  equity বাড়লে (ডিপোজিট বা লাভ) Update capital করুন; একই নিয়মে লট নিজে থেকে হিসাব হবে, ঝুঁকি % বাড়বে না।
+- নিউজের সময় 📰/⛔/📊 নোটিফিকেশন আসবে; এগুলো ট্রেড সিগন্যাল নয়। লকআউটের সময় কোনো READY আসবে না।
 - ডেমো ফরোয়ার্ড টেস্ট: প্রতিটা READY-এ (ডেমো অ্যাকাউন্টে বা শুধু কাগজে) "✅ ট্রেড নিয়েছি", শেষে আসল ফলাফল লিখুন।
   ৩০ দিন পরে 📒 জার্নালের স্ক্রিনশট আর ব্যাকআপ ফাইল পাঠান।
 
@@ -109,3 +120,4 @@ key-তে সই করা, তাই প্রতি আপডেটে uninst
 - [ ] ফোন: "PC test পাওয়া গেছে", "PC চলছে", "PC অফলাইন/বন্ধ"-এর স্ক্রিনশট
 - [ ] প্রথম READY বা NO TRADE সিগন্যালের বিস্তারিত পাতা আর TradingView চার্টের স্ক্রিনশট
 - [ ] ৩০ দিন পর জার্নালের স্ক্রিনশট আর ব্যাকআপ ফাইল
+- [ ] `python -m ayesha.cli capital --history`-এর লেখা (সংখ্যা ঢেকে দিতে পারেন) আর একটা নিউজ নোটিফিকেশনের স্ক্রিনশট

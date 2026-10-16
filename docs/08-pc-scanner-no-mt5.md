@@ -13,10 +13,11 @@ OANDA demo API (দাম, bid/ask) ─► PC scanner (নিয়ম + সব 
 ## সবচেয়ে সহজ পথ: install.bat (একবার)
 রেপো ডাউনলোড করে (GitHub → Code → Download ZIP, unzip) `desktop\windows\install.bat`-এ ডাবল-ক্লিক করুন। এটা ধাপে ধাপে:
 ১) Python আছে কিনা দেখে, ২) scanner ইনস্টল করে, ৩) OANDA টোকেন চায় (টাইপ করলে স্ক্রিনে দেখা যায় না, শুধু আপনার Windows-এ
-থাকে), ৪) Exness equity চায়, ৫) Exness contract মান চায়, ৬) ফোনের pairing code দেখায়, ৭) `doctor` দিয়ে সব যাচাই করে,
-শেষে জিজ্ঞেস করে Windows চালু হলে scanner নিজে চলবে কিনা (Y/N)। প্রতিদিন চালাতে `start-ayesha.bat`; বন্ধ হয়ে গেলে
-৬০ সেকেন্ড পর নিজে আবার চালু হয়। equity বদলালে install.bat আবার চালান। কোনো সমস্যা হলে `python -m ayesha.cli doctor`
-চালালে OK/FAIL তালিকা দেখাবে।
+থাকে), ৪) Exness equity আর খোলা ট্রেড চায় (`ayesha capital`), ৫) leverage আর **প্রতিটা পেয়ারের** Exness contract মান চায়,
+৬) ফোনের pairing code দেখায়, ৭) `doctor` দিয়ে সব যাচাই করে, শেষে জিজ্ঞেস করে Windows চালু হলে scanner নিজে চলবে কিনা (Y/N)।
+প্রতিদিন চালাতে `start-ayesha.bat`; শুরুতে equity নিশ্চিত করতে বলে, বন্ধ হয়ে গেলে ৬০ সেকেন্ড পর নিজে আবার চালু হয়।
+equity বদলালে (ডিপোজিট, উইথড্র, লাভ-ক্ষতি) যেকোনো সময় `python -m ayesha.cli capital`। কোনো সমস্যা হলে
+`python -m ayesha.cli doctor` চালালে OK/FAIL তালিকা দেখাবে। নিউজ আর capital-এর বিস্তারিত: [11-news-and-capital-guide.md](11-news-and-capital-guide.md)।
 
 নিচের ধাপগুলো হাতে করার জন্য (install.bat যা করে, সেটাই)।
 
@@ -32,11 +33,11 @@ OANDA demo API (দাম, bid/ask) ─► PC scanner (নিয়ম + সব 
 4. রেপো ডাউনলোড: GitHub → Code → Download ZIP (বা git clone), তারপর `desktop` ফোল্ডারে:
    `pip install -e .`
 
-## Exness contract নিশ্চিত করা (একবার)
-Exness অ্যাপ → EURUSD → **Specification** খুলুন। তারপর PC-তে:
-`python -m ayesha.cli confirm-broker --account-type Standard`
-অ্যাপে যা লেখা (contract size, min lot, step, max lot) হুবহু টাইপ করুন। না করলে প্রতিটা সিগন্যাল
-`CONTRACT_SPEC_UNVERIFIED` থাকবে, কোনোটাই READY হবে না। মানগুলো শুধু আপনার PC-তে থাকে।
+## Exness contract নিশ্চিত করা (একবার, প্রতিটা পেয়ার)
+PC-তে: `python -m ayesha.cli confirm-broker --account-type Standard`
+প্রথমে account leverage (যেমন `2000`), তারপর প্রতিটা পেয়ারের জন্য Exness অ্যাপ → পেয়ার → **Specification** খুলে contract size,
+min lot, step, max lot হুবহু টাইপ করুন। শুধু EURUSD দেখে অন্য পেয়ার নিশ্চিত হয় না: যে পেয়ার নিশ্চিত করা হয়নি তার সিগন্যাল
+`BROKER_SPEC_UNVERIFIED` থাকবে, READY হবে না। মানগুলো শুধু আপনার PC-তে থাকে।
 
 ## ফোন জোড়া লাগানো (একবার)
 1. PC-তে: `python -m ayesha.cli pair` → একটা কোড দেখাবে, যেমন `ABCD-EFGH-JKMN-PQRS`।
@@ -44,8 +45,9 @@ Exness অ্যাপ → EURUSD → **Specification** খুলুন। ত�
 3. PC-তে: `python -m ayesha.cli push-test` → অ্যাপের হোমে "PC test পাওয়া গেছে" দেখাবে।
 
 ## প্রতিদিন চালানো
-`desktop\windows\start-ayesha.bat` খুলুন (equity install.bat-এ দেওয়া মান থেকে নেয়)। এটা চালায়:
-`python -m ayesha.cli scan --feed oanda --equity 25 --account-type Standard --news-ff --push`
+`desktop\windows\start-ayesha.bat` খুলুন। এটা প্রথমে `python -m ayesha.cli capital --session-start` (equity নিশ্চিত করা), তারপর চালায়:
+`python -m ayesha.cli scan --feed oanda --account-type Standard --news-ff --push`
+(লট সবসময় সর্বশেষ নিশ্চিত equity থেকে; equity ২৪ ঘণ্টার বেশি পুরনো হলে READY বন্ধ: `CAPITAL_STALE`)
 - Windows **Task Scheduler** → Create Basic Task → "When I log on" → এই .bat ফাইল: PC চালু হলেই scanner চলবে।
 - PC বন্ধ বা ইন্টারনেট না থাকলে কোনো সিগন্যাল যাবে না। অ্যাপের হোমে ১২ মিনিটের বেশি খবর না এলে "PC অফলাইন" দেখাবে,
   scanner বন্ধ করলে "PC scanner বন্ধ" দেখাবে। ডেটা পুরনো হলে `DATA_STALE`, তখন কোনো READY হবে না।
@@ -53,20 +55,23 @@ Exness অ্যাপ → EURUSD → **Specification** খুলুন। ত�
 ## অ্যালার্টের মানে
 | অবস্থা | মানে |
 |---|---|
-| **READY** | PC-র সব gate পাস: নিয়ম, RR ≥ ২, ডেটা তাজা, spread সীমার মধ্যে, নিউজ ফাঁকা, Exness spec মালিক-নিশ্চিত, লট বাজেটের মধ্যে। তবুও Exness অ্যাপে দাম/spread মিলিয়ে নিন। |
+| **READY** | PC-র সব gate পাস: নিয়ম, RR ≥ ২, ডেটা তাজা, spread সীমার মধ্যে, নিউজ CLEAR (বা UPCOMING আর মেয়াদ লকআউটের আগে শেষ), এই পেয়ারের Exness spec মালিক-নিশ্চিত, equity আর খোলা ট্রেড সম্প্রতি নিশ্চিত, লট বাজেটের মধ্যে। তবুও Exness অ্যাপে দাম/spread মিলিয়ে নিন। |
 | **WATCH** | সেটআপ বৈধ কিন্তু এখনো entry নয় (যেমন M5 confirmation-এর অপেক্ষা)। নোটিফিকেশন হয় না; READY হলে একবার জানাবে। |
 | **NO TRADE** | সেটআপ ছিল কিন্তু কোনো gate আটকেছে (কারণ লেখা থাকে, যেমন `MIN_LOT_EXCEEDS_RISK`)। নোটিফিকেশন হয় না, আর্কাইভে থাকে। |
 | **UNVERIFIED** | সই ভুল, version আলাদা, দেরিতে আসা, watchlist-এর বাইরে ইত্যাদি। আর্কাইভে থাকে। |
 | **CHART CANDIDATE** | শুধু TradingView চার্টের নিয়ম (যদি আপনার প্ল্যানে চার্ট alert চলে)। নিউজ/spread যাচাই হয়নি। |
 
 **$20–30 Exness Standard USD:** 0.01 লট EURUSD-এ ১৮ pip SL-এ প্রায় $১.৯ ঝুঁকি = equity-র ৬–১০%। ০.৫–১% সীমায়
-তাই প্রায় সব সিগন্যাল **NO TRADE (MIN_LOT_EXCEEDS_RISK)** হবে। এটা ভুল নয়, এটাই নিরাপদ উত্তর।
+তাই প্রায় সব সিগন্যাল **NO TRADE (MIN_LOT_EXCEEDS_RISK)** হবে। এটা ভুল নয়, এটাই নিরাপদ উত্তর। equity বাড়লে একই নিয়মে
+(একই ০.৫%) লট নিজে থেকে হিসাব হয়; $20–30 কোনো স্থায়ী সীমা নয়।
 
 ## যা বাইরের সার্ভিসে যায় (জেনে রাখুন)
-- **ntfy.sh** (ফ্রি পাবলিক relay): সিগন্যালের লেখা (পেয়ার, লেভেল, অবস্থা) আর heartbeat। কোনো লগইন, ব্যালান্স, equity, টোকেন না।
+- **ntfy.sh** (ফ্রি পাবলিক relay): সিগন্যালের লেখা (পেয়ার, লেভেল, অবস্থা), নিউজ নোটিশ আর heartbeat। কোনো লগইন, ব্যালান্স,
+  equity, টোকেন না। equity-র বদলে শুধু pairing code দিয়ে তৈরি একটা ছাপ (digest), যাতে ফোন মিলিয়ে দেখতে পারে।
   টপিকের নাম আপনার কোড থেকে তৈরি; কেউ নাম জানলে বার্তা পড়তে পারবে কিন্তু নকল পাঠাতে পারবে না (সই মিলবে না)।
 - **OANDA**: শুধু দামের অনুরোধ (candles)। অর্ডার/ট্রেড endpoint কোডে নেই, CI তা পাহারা দেয়।
-- **Forex Factory** ক্যালেন্ডার export: ঘণ্টায় সর্বোচ্চ একবার, ক্যাশ করে রাখে। না পেলে `NEWS_UNVERIFIED` (ট্রেড বন্ধ)।
+- **Forex Factory** ক্যালেন্ডার export: ঘণ্টায় সর্বোচ্চ একবার, ক্যাশ করে রাখে। না পেলে বা ২৪ ঘণ্টার বেশি পুরনো হলে
+  `NEWS_UNVERIFIED` (ট্রেড বন্ধ)। এতে শুধু চলতি সপ্তাহের সময়, মুদ্রা, impact, forecast/previous থাকে; যাচাই করা actual থাকে না।
 
 ## TradingView Basic সম্পর্কে
 TradingView-এর pricing পাতা (https://www.tradingview.com/pricing/) অনুযায়ী Basic প্ল্যানে কয়েকটা price alert থাকে, কিন্তু

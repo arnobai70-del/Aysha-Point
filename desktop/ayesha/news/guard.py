@@ -9,7 +9,9 @@ Per pair, every relevant calendar event is placed in a phase:
 The pair's phase is the strictest phase of all its events (overlaps wait for the last window).
 Only CLEAR and UPCOMING allow a new READY, and an UPCOMING READY must expire before the next
 lockout starts (`next_block_start`). REACTION_WATCH ends only when closed M5 bars show the spread
-and range back near the pre-event baseline: a timer alone never clears it. Post-release market
+and range back near the pre-event baseline: a timer alone never clears it inside the watch. The watch
+is bounded by `reaction_watch_max_minutes` after the window; past that the event no longer blocks
+and the ordinary hard gates (absolute spread cap, quote age, risk) decide. Post-release market
 reaction is an explanation field (`reaction`), never permission to enter.
 
 Windows are configured in contracts/strategy-spec.yaml `news.tiers` and can never be shorter than
