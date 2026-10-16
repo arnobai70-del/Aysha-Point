@@ -4,9 +4,9 @@ This file keeps the owner's plan **AYESHA-HYBRID-AI-MASTER-001 v1.0** (2026-10-1
 the repository carries the design it is built from. Source file SHA-256:
 `1b27b361e7b850905255ab7bac027e02ead2dcd3dc93ee84b60d92025b06fa94`.
 
-Status: **v0.9.0 (research foundation) is built on branch `research/v0.9.0`** and waits for the owner's merge
-approval. v1.0.0 to v1.3.0 are not started. There is **no validated trading edge yet**; nothing in the research
-plane is a trade signal.
+Status: v0.9.0 (research foundation) is merged to `main` (`aad8dbd`). **v1.0.0 (Strategy Lab) is built on branch
+`research/v1.0.0`** and waits for the owner's merge approval. v1.1.0 to v1.3.0 are not started. There is **no
+validated trading edge yet**; nothing in the research plane is a trade signal.
 
 ## Review notes (CP-00 audit, 2026-10-16)
 
@@ -41,6 +41,20 @@ the corrections; the plan text below is left unchanged.
 | §10.1 `ayesha research run --strategy X`, `report --run R --format md` | `ayesha research run baseline-sweep-mss-fvg --dataset D --symbol S`, `ayesha research report R --md FILE` | Chosen in CP-00 (subcommand, not a second executable). `compare`, `regime`, `ml train` come with v1.0.0 to v1.2.0 |
 | §10.2 config | same keys, plus `memory_limit_mb`, `job_timeout_seconds`, `backup_keep`, `quality` | The safety locks are `const` in `contracts/research/research-config.schema.json`; an edited file can only turn research off |
 | §12 tests T01 to T12 | T01, T02, T05 to T08, T10 automated; T12 partly (versions, base dependencies, forbidden imports, informational `pip-audit`, no lock file yet); T03/T04 stay covered by the legacy suite; T09 (ML) and T11 (Android) not applicable | See [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md) |
+
+## How 1.0.0 maps to the plan (§6, CP-04, AI-008, AI-009), and where it differs
+
+| Plan | Built in 1.0.0 | Why it differs |
+|---|---|---|
+| §6.1 Baseline A SWEEP_MSS_FVG, unchanged | `strategies/baseline.py` wraps the live `MtfEngine` (M15, no M5 confirmation in the lab); through the common runner it equals the legacy replay trade for trade on every lab run (`benchmark_parity`) | The M5-confirmation mode stays on the 0.9.0 legacy path (`research run baseline-sweep-mss-fvg --mode m5confirm`) |
+| §6.1 Control B, simple session/volatility rule | `control-london-orb`: London opening-range breakout, stop at the other side of the range, net 2R target, one per day, pre-registered bounds | Chosen because it uses no smart-money concept at all, so it shows whether the baseline's complexity adds anything |
+| §6.1 Experimental C, H1/H4 trend continuation | `experimental-h1h4-trend`: H4 EMA trend, H1 pullback to its EMA, entry on the next H1 close beyond the previous bar | Exactly one experimental strategy, as the plan asks. Experimental D (order blocks etc.) is not built |
+| §6.2 manifest, collisions, no writes to the spec | `research.strategy/1` manifest with `parameter_bounds` and `dependencies`; the loader refuses duplicate ids, more than one experimental, unknown or out-of-bound parameters, and parameters for the frozen baseline; each strategy gets a deep copy of the spec | Plugins are built-in classes only (no loading of outside code; the plan's §4.3 notes plugins are not a sandbox) |
+| §6.3 realism | the legacy fill functions (bar spread on every fill, slippage buffer, stop first on a bar touching both, no profit on the fill bar, gap exits at the open, flat before rollover), the live sizing-independent gates, flags for stop-and-target bars and fill bars that reached the target | Historical contract values are ASSUMED Exness Standard values; news is NOT modelled (no permitted point-in-time calendar), so the strict live news gate is off in research and every result says so |
+| §6.3 portfolio | `simulation/portfolio.py`: one hypothetical account across symbols with the live `risk.engine.evaluate` (1 % cap, minimum lot, two losses and daily loss, open risk, one position per currency), dynamic equity, scenarios $20 to $5,000 | Owner-marked broker fills do not exist yet; nothing inferred is stored as a real trade |
+| §6.4 metrics | after-cost R with intervals, NO_TRADE and not-filled shares, folds, in/out-of-sample, sealed holdout, symbol/session/direction breakdowns, cost and parameter sensitivity, without-best-5 %, tails, losing streaks, exposure | Regime breakdown is `NOT_MODELLED` until v1.1.0; Sharpe only with 30+ closed trades |
+| §10.1 `compare` | `ayesha research strategies`, `lab`, `run <strategy>`, `compare`, `comparisons`, `report cmp_…` | Comparisons are stored as `exports` artifacts and audit events, without a new registry table, so a rollback to 0.9.0 still reads the folder |
+| §9.1 Strategy Lab page | dashboard `/lab` (strategies, comparisons), comparison and lab run pages with sanitised exports | Read-only as before |
 
 Related: [RESEARCH_DATA_POLICY.md](RESEARCH_DATA_POLICY.md) · [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md) ·
 [MODEL_GOVERNANCE.md](MODEL_GOVERNANCE.md) · [RELEASE_ROLLBACK.md](RELEASE_ROLLBACK.md) ·

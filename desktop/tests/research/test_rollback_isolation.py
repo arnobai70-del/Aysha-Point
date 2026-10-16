@@ -158,6 +158,6 @@ def test_t12_base_dependencies_unchanged_and_versions_consistent():
     version = re.search(r'^version = "([^"]+)"', py, re.M).group(1)
     man = json.loads((ROOT / "contracts" / "version.json").read_text(encoding="utf-8"))
     assert ayesha.__version__ == version == man["components"]["desktop"] == man["release"] == RESEARCH_VERSION
-    assert man["components"]["research_contracts"] == "1"
+    assert man["components"]["research_contracts"] == "2"
     assert (man["components"]["strategy"], man["components"]["signal_schema"],
             man["components"]["phone_wire_format"], man["components"]["android_app"]) == ("0.4.0", "1.1", "4", "0.5.0")

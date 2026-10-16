@@ -1,4 +1,4 @@
-# Verification checklist (acceptance tests, updated for 0.9.0)
+# Verification checklist (acceptance tests, updated for 1.0.0)
 
 Legend: **CI** = proven by an automated test on GitHub Actions (test name given) · **PARTIAL** = part proven, rest pending ·
 **PENDING OWNER** = needs the owner's account, phone or authorization · **OPEN** = not built yet.
@@ -91,24 +91,25 @@ fixture data: none of these proves that the strategy or the news protection make
 | I05 | Real Windows PC, Android 13 phone, Pine compile, owner-confirmed Exness specs stay PENDING OWNER | PENDING OWNER | Not observed yet. Checklist: [11-news-and-capital-guide.md](11-news-and-capital-guide.md) section জ and [10-owner-testing-guide.md](10-owner-testing-guide.md) |
 | I06 | Forward-paper period specified; live money not advertised as verified | PENDING OWNER | Period: at least 30 trading days on demo or paper, every READY journaled (docs/11 section জ, AT-26). README and STATUS say there is no validated trading edge |
 
-## Hybrid AI plan: research foundation (release 0.9.0)
+## Hybrid AI plan: research foundation (0.9.0) and Strategy Lab (1.0.0)
 
 Tests T01–T12 of plan §12. Python tests are in `desktop/tests/research/` and run in `ci` and `research-ci` on Ubuntu
 and Windows. All data is synthetic: none of this shows a trading edge. Full mapping, plan acceptance criteria and
-tickets AI-001 to AI-007: [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md).
+tickets AI-001 to AI-009: [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md).
 
 | # | Requirement | Status | Evidence / what is missing |
 |---|---|---|---|
 | T01 | Snapshot hashing, replay determinism, atomic writes | CI | `test_csv_ingest_is_content_addressed_and_idempotent`, `test_tampered_artifact_is_detected_before_use`, `test_atomic_writes_leave_no_partial_files`, `test_same_inputs_same_run_id_and_hashes_and_verify` |
-| T02 | Closed bars, as-of news, future-data mutation, no lookahead | PARTIAL | `test_t02_future_bars_cannot_change_earlier_decisions`, `INCOMPLETE_BAR`/`FUTURE_BAR` rejection; news is not modelled by research (`NEWS_NOT_MODELLED`) until v1.1.0 |
-| T03 | Bid/ask, spread/slippage, stop-first, fees | PARTIAL | Baseline reuses the legacy replay and its tests (`test_strategy_backtest.py`); named cost models and spread sensitivity are v1.0.0 |
-| T04 | Per-pair Exness spec, Standard/Cent, min lot, hard cap, correlation | PARTIAL | Legacy C04–C07, AT-11, AT-15 unchanged; research uses `ASSUMED_EXNESS_STANDARD_CONTRACT` and hypothetical equity only |
+| T02 | Closed bars, as-of news, future-data mutation, no lookahead | PARTIAL | `test_t02_future_bars_cannot_change_earlier_decisions`, `test_future_bars_cannot_change_earlier_decisions` (lab A, B, C), `INCOMPLETE_BAR`/`FUTURE_BAR` rejection; news is not modelled by research (`NEWS_NOT_MODELLED`) until v1.1.0 |
+| T03 | Bid/ask, spread/slippage, stop-first, fees | CI | Legacy fills and their tests (`test_strategy_backtest.py`); named cost models and sensitivity (`test_cost_models_have_ids_and_hashes_and_change_one_thing`, `test_slippage_and_delay_variants`), intrabar flags (`test_intrabar_ambiguity_is_flagged`) |
+| T04 | Per-pair Exness spec, Standard/Cent, min lot, hard cap, correlation | PARTIAL | Legacy C04–C07, AT-11, AT-15 unchanged; lab accounts use the live risk engine (`test_account_simulation_uses_the_live_gates`, `test_one_position_per_currency`) with `ASSUMED_EXNESS_STANDARD_CONTRACT` and hypothetical equity only |
 | T05 | Research cannot write the live DB, leak the token or produce READY | CI | `test_t05_research_cannot_write_the_live_registry`, `test_research_files_never_hold_the_token_or_pairing_code`, `test_a_research_decision_can_never_be_ready`, `test_outputs_are_research_only_never_ready_or_executable`, `test_static_isolation_rules_hold` |
 | T06 | Research off gives the exact 0.8.0 output | CI | Golden fingerprint `tests/research/fixtures/legacy-golden-0.8.0.json` (commit `33f9342`, written before any research code): `test_legacy_compatibility.py`; `test_research_is_off_by_default_and_creates_nothing` |
 | T07 | Worker crash, memory or overload does not affect the scanner | CI | `test_scanner_results_are_unchanged_while_a_research_worker_hangs`, `test_crash_is_recorded_and_the_lock_is_released`, `test_hang_is_stopped_by_the_timeout`, `test_memory_blow_up_hits_the_limit_not_the_pc` |
 | T08 | Dashboard loopback only, escaping, privacy, redacted export | CI | `test_key_cookie_host_and_methods`, `test_values_are_escaped_and_redacted`, `test_run_page_and_sanitised_exports`, `test_live_registry_view_is_read_only_and_hides_money`, `research dashboard --check` |
-| T09 | Walk-forward, embargo, holdout, model provenance | N/A | No ML in 0.9.0 (v1.2.0) |
+| T09 | Walk-forward, embargo, holdout, model provenance | PARTIAL | Lab folds, sealed holdout and audited reveal (`test_holdout_stays_sealed_until_revealed`, `test_revealing_the_holdout_is_a_new_audited_run`); no ML yet (v1.2.0) |
 | T10 | Rollback to 0.8.0 behaviour without data loss | CI | `test_cli_end_to_end_then_t10_rollback`, `test_disable_always_works_even_with_a_broken_settings_file`, `scripts/research_smoke.py`, `scripts/windows_research_tests.ps1`; steps in [RELEASE_ROLLBACK.md](RELEASE_ROLLBACK.md) |
 | T11 | Android old payloads, signing, journal | N/A | Android unchanged; no APK published for 0.9.0 |
 | T12 | Dependency lock, vulnerability scan, forbidden imports, order API | PARTIAL | `test_t12_base_dependencies_unchanged_and_versions_consistent`, isolation and order-API scans; `pip-audit` informational in `research-ci`; no lock file (OPEN) |
-| R-OWNER | Real-data ingest, baseline run, parity and dashboard on the owner's PC | PENDING OWNER | [12-research-guide.md](12-research-guide.md) |
+| AI-008/009 | Strategy contract, controls, uniform cost-aware comparison | CI (synthetic) | `test_strategy_lab.py`, `test_lab_runs.py`, `research_smoke.py`; plan acceptance in RESEARCH_ACCEPTANCE section 1b |
+| R-OWNER | Real-data ingest, baseline run, parity, lab and dashboard on the owner's PC | PENDING OWNER | [12-research-guide.md](12-research-guide.md) |

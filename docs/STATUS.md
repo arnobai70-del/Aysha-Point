@@ -1,4 +1,4 @@
-# AYESHA FX: status (release 0.9.0, 2026-10-16)
+# AYESHA FX: status (release 1.0.0, 2026-10-16)
 
 **Implemented** = code exists. **Tested (CI)** = automated tests on GitHub Actions. **Verified** = seen working on the
 real platform (TradingView account, a real phone, the owner's broker, real market data). Nothing below is verified on
@@ -10,6 +10,9 @@ been run, so there is **no validated trading edge yet**. News direction (actual 
 Release 0.9.0 adds the **research plane** (Hybrid AI plan, milestone v0.9.0), **off by default**. It never produces
 READY, never sends anything to the phone and places no orders; with research on or off, the advisory path below is
 byte-identical to 0.8.0 (golden fingerprint, plan T06). The phone app stays 0.5.0 (no new APK).
+Release 1.0.0 adds the research **Strategy Lab** (milestone v1.0.0): the baseline, one control and one experimental
+strategy replayed by one common runner and compared on the same data, split, costs and hypothetical accounts. It is
+still research only; no strategy in it is validated, and none of them can reach the phone.
 
 | Part | Implemented | Tested (CI) | Verified on real platform |
 |---|---|---|---|
@@ -37,7 +40,7 @@ byte-identical to 0.8.0 (golden fingerprint, plan T06). The phone app stays 0.5.
 | Python ↔ Pine behavior parity | no | no | no |
 | Python ↔ Kotlin wire-format parity (incl. MTF, news notices, capital digest) | yes | shared fixtures + signature and digest vectors | n/a |
 
-### Research plane (0.9.0, off by default)
+### Research plane (0.9.0 foundation, 1.0.0 Strategy Lab; off by default)
 
 | Part | Implemented | Tested (CI) | Verified on real platform |
 |---|---|---|---|
@@ -48,7 +51,8 @@ byte-identical to 0.8.0 (golden fingerprint, plan T06). The phone app stays 0.5.
 | Separate limited worker process (Windows job object memory/CPU caps, kill-on-close; POSIX nice + memory limit), timeout, one writer | yes | `test_worker_isolation.py` incl. the scanner golden scenario while a worker hangs (T07) | **pending**: owner PC |
 | Read-only dashboard on 127.0.0.1 (key, Host check, GET only, no scripts, redacted, money hidden) | yes | `test_dashboard.py`, `research dashboard --check` (T08) | **pending**: owner PC |
 | `ayesha research` CLI, research doctor, `start-research.bat`, `backup-research.bat`, isolation check | yes | `test_rollback_isolation.py` (T05, T10), `research_smoke.py`, `windows_research_tests.ps1`, `check_research_isolation.py` | **pending**: owner PC |
-| Strategy lab, regimes, historical news comparison, ML, phone research tab (v1.0.0 to v1.3.0) | no | no | not started; historical news **BLOCKED BY DATA**, ML only with enough validated data |
+| **Strategy Lab (1.0.0)**: strategy contract and loader (baseline A frozen, control B London ORB, exactly one experimental C H1/H4 trend), common runner with the legacy fills and gates (baseline trade-for-trade equal to the legacy replay), cost models and sensitivity, account simulation with the live risk engine, split plan with sealed holdout, after-cost metrics, side-by-side comparison | yes | `test_strategy_lab.py`, `test_lab_runs.py`, `research_smoke.py` (synthetic) | **pending**: real data; no real result exists, so nothing is known about any of the three |
+| Regimes, historical news comparison, ML, phone research tab (v1.1.0 to v1.3.0) | no | no | not started; historical news **BLOCKED BY DATA**, ML only with enough validated data |
 
 ## What an alert means
 - **READY** only comes from the PC scanner, signed with the owner's pairing code, fresh, same strategy hash, news
@@ -81,9 +85,9 @@ Step-by-step Bengali guides with expected results: [10-owner-testing-guide.md](1
    (AT-26, I06). Real money is not advised before this and a real-data report exist.
 6. Run `desktop\windows\make-signing-key.bat`, add its four `AYESHA_KEYSTORE_*`/`AYESHA_KEY_*` secrets, keep the key
    offline (AT-23). Back up the journal in the app before every uninstall.
-7. Optional, research (0.9.0): approve the merge of the research pull request; then, if you want, follow
-   [12-research-guide.md](12-research-guide.md) (enable, ingest from OANDA practice, baseline run, report) and send the
-   `report.md`. Research stays off unless you turn it on.
+7. Optional, research (1.0.0): approve the merge of the Strategy Lab pull request (0.9.0 is already merged); then,
+   if you want, follow [12-research-guide.md](12-research-guide.md) (enable, ingest from OANDA practice, `research lab`,
+   report) and send the `lab.md`. Research stays off unless you turn it on.
 
 See [VERIFICATION.md](VERIFICATION.md), [MASTER_CHECKLIST.md](MASTER_CHECKLIST.md), [FEATURE_MATRIX.md](FEATURE_MATRIX.md)
 and, for research, [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md).

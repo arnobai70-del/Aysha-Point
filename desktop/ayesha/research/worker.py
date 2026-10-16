@@ -40,7 +40,7 @@ from typing import Any, Callable
 EXIT_OK, EXIT_REFUSED, EXIT_RESOURCE, EXIT_FAILED, EXIT_BUSY, EXIT_CANCELLED = 0, 2, 3, 70, 75, 130
 STATUS_BY_EXIT = {EXIT_OK: "OK", EXIT_REFUSED: "REFUSED", EXIT_RESOURCE: "RESOURCE_LIMIT", EXIT_FAILED: "FAILED",
                   EXIT_CANCELLED: "CANCELLED"}
-KINDS = ("ingest_csv", "ingest_oanda", "baseline", "parity", "selftest")
+KINDS = ("ingest_csv", "ingest_oanda", "baseline", "parity", "strategy", "lab", "compare", "selftest")
 SELFTESTS = ("ok", "crash", "hang", "memory")
 LOCK_OFFSET = 1 << 20  # Windows: lock a byte far past the PID text so other processes can still read the PID
 
@@ -270,9 +270,30 @@ def _dispatch(job: dict[str, Any]) -> dict[str, Any]:
 
             return parity(ws, spec, a["dataset_id"], a["symbol"], mode=a.get("mode") or "m15",
                           legacy_csv=a.get("legacy_csv"), account_type=a.get("account_type") or "Standard")
+        if kind == "strategy":
+            from ayesha.research.simulation.lab import run_strategy
+
+            return run_strategy(ws, spec, a["strategy_id"], a["dataset_id"], a["symbols"], **_lab_args(a),
+                                verify=bool(a.get("verify")))
+        if kind == "lab":
+            from ayesha.research.evaluation.comparison import run_lab
+
+            return run_lab(ws, spec, a["dataset_id"], a["symbols"], **_lab_args(a))
+        if kind == "compare":
+            from ayesha.research.evaluation.comparison import compare
+
+            d = compare(ws, list(a["run_ids"]))
+            return {"comparison_id": d["comparison_id"], "ranking": d["ranking"]["state"],
+                    "benchmark_parity": d["benchmark_parity"].get("status")}
         raise ValueError(f"unknown job kind {kind!r}")
     finally:
         ws.close()
+
+
+def _lab_args(a: dict[str, Any]) -> dict[str, Any]:
+    return {"folds": int(a.get("folds") or 4), "split": a.get("split"), "holdout": a.get("holdout"),
+            "reveal_holdout": bool(a.get("reveal_holdout")), "account_type": a.get("account_type") or "Standard",
+            "allow_degraded": bool(a.get("allow_degraded")), "robustness": not a.get("quick")}
 
 
 def _refusals() -> tuple[type[BaseException], ...]:
@@ -283,9 +304,11 @@ def _refusals() -> tuple[type[BaseException], ...]:
     from ayesha.research.datasets.store import IntegrityError
     from ayesha.research.simulation.baseline import RunRefused
     from ayesha.research.storage.db import ResearchDBError
+    from ayesha.research.strategies.loader import StrategyError
 
     return (ResearchDisabled, ResearchConfigError, ContractError, IngestError, IntegrityError, RunRefused,
-            ResearchDBError, AuthRejected, MissingToken, FileNotFoundError, NotADirectoryError, KeyError)
+            ResearchDBError, StrategyError, AuthRejected, MissingToken, FileNotFoundError, NotADirectoryError,
+            KeyError)
 
 
 def child_main(argv: list[str] | None = None) -> int:

@@ -2,7 +2,7 @@
 
 Research is research-only: nothing here can place, change or close an order, produce READY, write the live signal
 registry or reach the phone. It is OFF by default (legacy_only); `ayesha research enable` turns it on. Heavy jobs
-(ingest, run, parity) run in a separate low-priority worker process.
+(ingest, run, lab, compare, parity) run in a separate low-priority worker process.
 
 Exit codes: 0 OK, 1 failed (job failed/crashed/timed out, or a doctor check FAILED), 2 refused (research off,
 invalid input, rejected or degraded data), 75 busy (another research job is running).
@@ -183,8 +183,8 @@ def cmd_ingest(a) -> int:
         return EXIT_REFUSED
     if r["quality_state"] == "DEGRADED":
         print("DEGRADED: inspect it first; a run needs --allow-degraded and is then marked DEGRADED_INPUT_DATA.")
-    print(f"Next: ayesha research run baseline-sweep-mss-fvg --dataset {r['dataset_id']} --symbol "
-          f"{r['partitions'][0]['symbol']}")
+    print(f"Next: ayesha research lab --dataset {r['dataset_id']} --symbols "
+          f"{','.join(sorted({p['symbol'] for p in r['partitions']}))}")
     return EXIT_OK
 
 
@@ -258,26 +258,124 @@ def cmd_inspect(a) -> int:
     return EXIT_OK
 
 
+def cmd_strategies(a) -> int:
+    from ayesha.config import load_spec
+    from ayesha.research.strategies.loader import available
+
+    mans = available(load_spec(a.spec))
+    if a.json:
+        _p(mans)
+        return EXIT_OK
+    for m in mans:
+        print(f"{m['strategy_id']} {m['version']}  {m['kind']:<12}  hash {m['strategy_hash']}")
+        print(f"    {m['explanation']}")
+        if m.get("parameter_bounds"):
+            print("    parameters: " + ", ".join(f"{k}={b['default']:g} [{b['low']:g}..{b['high']:g} step {b['step']:g}]"
+                                                for k, b in m["parameter_bounds"].items()))
+    print("Research only: none of these is a live rule, none can produce READY or reach the phone.")
+    return EXIT_OK
+
+
+def _lab_args(a) -> dict[str, Any]:
+    return {"dataset_id": a.dataset, "symbols": a.symbols or a.symbol, "split": a.split or None, "folds": a.folds,
+            "holdout": a.holdout or None, "reveal_holdout": a.reveal_holdout, "account_type": a.account_type,
+            "allow_degraded": a.allow_degraded, "quick": a.quick, "spec": a.spec}
+
+
+def _print_lab_run(r: dict[str, Any]) -> None:
+    print(f"Run {r['run_id']} ({r['strategy_id']}): {r['status']}" +
+          (" (already done with exactly these inputs)" if r.get("existing") else ""))
+    if not r.get("existing"):
+        print(f"  Signals {r['signals']}, closed trades {r['closed_trades']}, expectancy after costs "
+              f"{r['expectancy_r'] if r['expectancy_r'] is not None else '-'} R; limitations: "
+              f"{', '.join(r['limitations'])}")
+
+
 def cmd_run(a) -> int:
-    if a.strategy != "baseline-sweep-mss-fvg":
-        print("Only baseline-sweep-mss-fvg exists in v0.9.0 (the frozen live rules, replayed unchanged).")
-        return EXIT_REFUSED
-    args = {"dataset_id": a.dataset, "symbol": a.symbol.upper(), "mode": a.mode, "split": a.split or None,
-            "folds": a.folds, "account_type": a.account_type, "allow_degraded": a.allow_degraded,
-            "verify": a.verify, "spec": a.spec}
-    rc, r = _job("baseline", args)
+    from ayesha.research.strategies.loader import LAB_ORDER
+
+    legacy = a.strategy == LAB_ORDER[0] and not a.symbols and not a.holdout and not a.quick
+    if legacy:
+        if not a.symbol:
+            print("Give --symbol (one pair) or --symbols (comma list)")
+            return EXIT_REFUSED
+        args = {"dataset_id": a.dataset, "symbol": a.symbol.upper(), "mode": a.mode, "split": a.split or None,
+                "folds": a.folds, "account_type": a.account_type, "allow_degraded": a.allow_degraded,
+                "verify": a.verify, "spec": a.spec}
+        rc, r = _job("baseline", args)
+    else:
+        if a.strategy not in LAB_ORDER:
+            print(f"Unknown research strategy {a.strategy}. See: ayesha research strategies")
+            return EXIT_REFUSED
+        if a.mode != "m15":
+            print("Strategy Lab runs use M15 bars; --mode m5confirm exists for the baseline's legacy path only.")
+            return EXIT_REFUSED
+        if not (a.symbols or a.symbol):
+            print("Give --symbol (one pair) or --symbols (comma list)")
+            return EXIT_REFUSED
+        rc, r = _job("strategy", {**_lab_args(a), "strategy_id": a.strategy, "verify": a.verify})
     if r is None:
         return rc
     if a.verify and "verified" in r:
         print(f"{r['run_id']}: {'VERIFIED: the recomputed result has the same hash' if r['verified'] else 'MISMATCH'}"
               f" ({r['recomputed_result_sha256'][:16]})")
         return EXIT_OK if r["verified"] else EXIT_FAILED
-    print(f"Run {r['run_id']}: {r['status']}" + (" (already done with exactly these inputs)" if r.get("existing")
-                                                 else ""))
-    if not r.get("existing"):
-        print(f"Signals {r['signals']}, closed trades {r['closed_trades']}; limitations: "
-              f"{', '.join(r['limitations'])}")
+    if legacy:
+        print(f"Run {r['run_id']}: {r['status']}" + (" (already done with exactly these inputs)" if r.get("existing")
+                                                     else ""))
+        if not r.get("existing"):
+            print(f"Signals {r['signals']}, closed trades {r['closed_trades']}; limitations: "
+                  f"{', '.join(r['limitations'])}")
+    else:
+        _print_lab_run(r)
     print(f"Report: ayesha research report {r['run_id']} --md report.md")
+    return EXIT_OK
+
+
+def cmd_lab(a) -> int:
+    rc, r = _job("lab", _lab_args(a))
+    if r is None:
+        return rc
+    for run in r["runs"]:
+        _print_lab_run(run)
+    print(f"\nComparison {r['comparison_id']}: ranking {r['ranking']}, benchmark parity {r['benchmark_parity']}")
+    print(f"Report: ayesha research report {r['comparison_id']} --md lab.md")
+    print("Research only: a strategy that looks better here is not validated and is never traded automatically.")
+    return EXIT_OK if r["benchmark_parity"] in ("MATCHED", "NOT_INCLUDED") else EXIT_FAILED
+
+
+def cmd_compare(a) -> int:
+    rc, r = _job("compare", {"run_ids": a.run_ids, "spec": a.spec})
+    if r is None:
+        return rc
+    print(f"Comparison {r['comparison_id']}: ranking {r['ranking']}, benchmark parity {r['benchmark_parity']}")
+    print(f"Report: ayesha research report {r['comparison_id']} --md lab.md")
+    return EXIT_OK
+
+
+def cmd_comparisons(a) -> int:
+    from ayesha.research.evaluation.comparison import comparisons
+    from ayesha.research.readonly import ReadOnlyWorkspace
+
+    if not (research_home() / "research.db").exists():
+        print("No research data yet.")
+        return EXIT_OK
+    ws = ReadOnlyWorkspace(research_home())
+    try:
+        docs = comparisons(ws)
+    finally:
+        ws.close()
+    rows = [{"comparison_id": d["comparison_id"], "dataset_id": d["dataset_id"], "symbols": d["symbols"],
+             "strategies": [r["strategy_id"] for r in d["runs"]], "ranking": d["ranking"]["state"],
+             "created_at_utc": d["created_at_utc"]} for d in docs]
+    if a.json:
+        _p(rows)
+        return EXIT_OK
+    if not rows:
+        print("No comparisons yet. Run: ayesha research lab --dataset DS --symbols EURUSD,GBPUSD")
+    for r in rows:
+        print(f"{r['comparison_id']}  {r['dataset_id']} {','.join(r['symbols'])}  {len(r['strategies'])} strategies  "
+              f"{r['ranking']}  {r['created_at_utc']}")
     return EXIT_OK
 
 
@@ -295,7 +393,7 @@ def cmd_runs(a) -> int:
         con.close()
     for r in rows:
         inp = json.loads(r.pop("inputs_json"))
-        r["symbol"], r["mode"] = inp.get("symbol"), inp.get("mode")
+        r["symbol"], r["mode"] = inp.get("symbol") or ",".join(inp.get("symbols", [])), inp.get("mode")
     if a.json:
         _p(rows)
         return EXIT_OK
@@ -308,16 +406,22 @@ def cmd_runs(a) -> int:
 
 
 def cmd_report(a) -> int:
-    from ayesha.research.evaluation.report import run_json, run_markdown
+    from ayesha.research.evaluation import comparison
+    from ayesha.research.evaluation.report import comparison_json, comparison_markdown, run_json, run_markdown
+    from ayesha.research.readonly import ReadOnlyWorkspace
     from ayesha.research.simulation.baseline import RunRefused
 
     if not (research_home() / "research.db").exists():
         print("No research data yet.")
         return EXIT_REFUSED
-    ws = _ws()
+    ws = ReadOnlyWorkspace(research_home())
     try:
-        md = run_markdown(ws, a.run_id)
-        doc = run_json(ws, a.run_id) if a.json else None
+        if a.run_id.startswith("cmp_"):
+            c = comparison.load(ws, a.run_id)
+            md, doc = comparison_markdown(c), comparison_json(c)
+        else:
+            md = run_markdown(ws, a.run_id)
+            doc = run_json(ws, a.run_id) if a.json else None
     except RunRefused as e:
         print(str(e))
         return EXIT_REFUSED
@@ -466,24 +570,48 @@ def build_parser(prog: str = "ayesha research") -> argparse.ArgumentParser:
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_inspect)
 
-    s = sub.add_parser("run", help="run a research strategy on a frozen dataset")
-    s.add_argument("strategy", help="baseline-sweep-mss-fvg")
-    s.add_argument("--dataset", required=True)
-    s.add_argument("--symbol", required=True)
-    s.add_argument("--mode", default="m15", choices=["m15", "m5confirm"])
-    s.add_argument("--split", help="in-sample / out-of-sample split date, e.g. 2025-01-01")
-    s.add_argument("--folds", type=int, default=4, choices=range(2, 13), metavar="2..12")
-    s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
-    s.add_argument("--allow-degraded", action="store_true", help="use a DEGRADED dataset (marked in the result)")
+    s = sub.add_parser("strategies", help="list the research strategies (baseline, control, experimental)")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_strategies)
+
+    def lab_opts(s, symbol_required: bool) -> None:
+        s.add_argument("--dataset", required=True)
+        if not symbol_required:
+            s.add_argument("--symbol", help="one pair")
+        s.add_argument("--symbols", required=symbol_required, help="comma list of pairs (one account across them)")
+        s.add_argument("--split", help="in-sample / out-of-sample split date, e.g. 2025-01-01")
+        s.add_argument("--folds", type=int, default=4, choices=range(2, 13), metavar="2..12")
+        s.add_argument("--holdout", help="seal the data from this date (results hidden until --reveal-holdout)")
+        s.add_argument("--reveal-holdout", action="store_true",
+                       help="show the sealed holdout results (recorded in the audit trail; do it once, at the end)")
+        s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
+        s.add_argument("--allow-degraded", action="store_true", help="use a DEGRADED dataset (marked in the result)")
+        s.add_argument("--quick", action="store_true", help="skip the robustness re-runs (costs, parameters)")
+
+    s = sub.add_parser("run", help="run one research strategy on a frozen dataset")
+    s.add_argument("strategy", help="see: ayesha research strategies")
+    lab_opts(s, symbol_required=False)
+    s.add_argument("--mode", default="m15", choices=["m15", "m5confirm"],
+                   help="m5confirm: baseline only, legacy replay path (v0.9.0)")
     s.add_argument("--verify", action="store_true", help="recompute a finished run and compare its hashes")
     s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("lab", help="Strategy Lab: run every research strategy on the same inputs and compare them")
+    lab_opts(s, symbol_required=True)
+    s.set_defaults(fn=cmd_lab, symbol=None)
+    s = sub.add_parser("compare", help="compare finished lab runs (same dataset, symbols, split, costs, account)")
+    s.add_argument("run_ids", nargs="+")
+    s.set_defaults(fn=cmd_compare)
+    s = sub.add_parser("comparisons", help="list Strategy Lab comparisons")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_comparisons)
 
     s = sub.add_parser("runs", help="list research runs")
     s.add_argument("--limit", type=int, default=50)
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_runs)
-    s = sub.add_parser("report", help="sanitised run report (Markdown / JSON)")
-    s.add_argument("run_id")
+    s = sub.add_parser("report", help="sanitised run or comparison report (Markdown / JSON)")
+    s.add_argument("run_id", help="a run id (run_...) or a comparison id (cmp_...)")
     s.add_argument("--md", help="write Markdown here")
     s.add_argument("--json", help="write JSON here")
     s.set_defaults(fn=cmd_report)

@@ -52,11 +52,11 @@ See `CHANGELOG.md` for details. Checklist items in the master spec are only tick
 - Still blocked: phase 3 (edge validation) needs the owner's OANDA history run, and the news comparison also needs a
   permitted historical calendar. Then the 30-day demo forward test (phase 7). No new setups until that evidence exists.
 
-## 2026-10-16 Hybrid Advanced AI plan (release 0.9.0, research foundation)
+## 2026-10-16 Hybrid Advanced AI plan (releases 0.9.0 and 1.0.0)
 - The owner's plan [HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md) adds a research plane next to the advisory
-  path. Order: CP-00 audit (done) → **v0.9.0 research foundation** (built on branch `research/v0.9.0`, waiting for the
-  owner's merge approval) → v1.0.0 strategy lab → v1.1.0 regimes and historical news → v1.2.0 optional ML → v1.3.0
-  phone research tab. Each milestone is its own branch and pull request.
+  path. Order: CP-00 audit (done) → v0.9.0 research foundation (merged to `main` as `aad8dbd`) → **v1.0.0 Strategy
+  Lab** (built on branch `research/v1.0.0`, waiting for the owner's merge approval) → v1.1.0 regimes and historical
+  news → v1.2.0 optional ML → v1.3.0 phone research tab. Each milestone is its own branch and pull request.
 - Research is off by default and never a READY source; the advisory path stays exactly 0.8.0 (golden fingerprint).
 - The earlier gates still hold: phase 3 (real-data edge validation) and the 30-day forward test come before any new
   live setup. v1.0.0 needs the owner's real OANDA dataset to say anything; v1.1.0 news comparison needs a permitted

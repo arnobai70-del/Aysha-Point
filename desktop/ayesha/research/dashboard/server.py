@@ -109,7 +109,8 @@ class App:
     # --- plumbing -----------------------------------------------------------------------------
     def page(self, title: str, body: str) -> bytes:
         nav = "".join(link(h, t) for h, t in (("/", "সারাংশ · Overview"), ("/data", "ডেটা · Data"),
-                                               ("/runs", "রান · Runs"), ("/legacy", "লাইভ স্ক্যানার · Live scanner"),
+                                               ("/runs", "রান · Runs"),
+                                               ("/lab", "স্ট্র্যাটেজি ল্যাব · Strategy Lab"), ("/legacy", "লাইভ স্ক্যানার · Live scanner"),
                                                ("/diagnostics", "ডায়াগনস্টিক · Diagnostics"),
                                                ("/settings", "সেটিংস · Settings")))
         doc = (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>{e(title)} - AYESHA research"
@@ -145,6 +146,12 @@ class App:
                 return self._ok(f"Run {parts[1]}", self.run(ws, parts[1]))
             if len(parts) == 3 and parts[0] == "runs" and parts[2] in ("report.md", "report.json"):
                 return self.export(ws, parts[1], parts[2])
+            if parts == ["lab"]:
+                return self._ok("Strategy Lab", self.lab(ws))
+            if len(parts) == 2 and parts[0] == "lab":
+                return self._ok(f"Comparison {parts[1]}", self.comparison(ws, parts[1]))
+            if len(parts) == 3 and parts[0] == "lab" and parts[2] in ("report.md", "report.json"):
+                return self.export_comparison(ws, parts[1], parts[2])
             if parts == ["legacy"]:
                 return self._ok("Live scanner (read-only view)", self.legacy())
             if parts == ["diagnostics"]:
@@ -232,7 +239,8 @@ class App:
         for r in runs:
             inp = json.loads(r["inputs_json"])
             rows.append([link(f"/runs/{r['run_id']}", r["run_id"]), r["status"], r["strategy_id"], r["version"],
-                         link(f"/data/{r['dataset_id']}", r["dataset_id"]), inp.get("symbol"), inp.get("mode"),
+                         link(f"/data/{r['dataset_id']}", r["dataset_id"]),
+                         inp.get("symbol") or ",".join(inp.get("symbols", [])), inp.get("mode"),
                          r["created_utc"]])
         return table(["Run", "Status", "Strategy", "Version", "Dataset", "Symbol", "Mode", "Created"], rows,
                      raw_cols=(0, 4))
@@ -251,6 +259,8 @@ class App:
         if row["status"] != "COMPLETED":
             return table(["", ""], [["Status", row["status"]], ["Error", row["error"]], ["Created", row["created_utc"]]])
         res = load_result(ws, run_id)
+        if res.get("engine") == "research-runner-1":
+            return self.lab_run(ws, res)
         mt = res["metrics"]
         s = mt["summary"]
         out = [f"<p>{link(f'/runs/{run_id}/report.md', 'Download sanitised report (Markdown)')} &nbsp; "
@@ -304,6 +314,141 @@ class App:
             [[c["asof_utc"], c["pair"], c["direction"], c["proposed_state"], c["replay_status"], c["outcome_r"],
               ", ".join(c["rejection_codes"])] for c in cands[:300]]))
         return "".join(out)
+
+    # --- Strategy Lab (v1.0.0) ---------------------------------------------------------------------
+    LAB_CELLS = ("signals", "closed_trades", "win_rate", "expectancy_r", "expectancy_r_95ci", "total_r",
+                 "profit_factor", "max_drawdown_r", "sample")
+
+    def lab(self, ws) -> str:
+        from ayesha.config import load_spec
+        from ayesha.research.evaluation.comparison import comparisons
+        from ayesha.research.strategies.loader import available
+
+        out = ["<p lang='bn'>একই frozen ডেটা, একই সময়-বিভাজন, একই খরচ ও একই hypothetical account-এ তিনটি research "
+               "strategy পাশাপাশি। ভালো দেখালেও কোনোটি যাচাই করা edge নয়, কোনোটি live হয় না।</p>",
+               "<p>The same frozen data, split, costs and hypothetical account for every strategy. A strategy that "
+               "looks better here is not validated and never becomes live.</p><h2>Strategies</h2>"]
+        out.append(table(["Strategy", "Kind", "Version", "Hash", "What it does"], [
+            [m["strategy_id"], m["kind"], m["version"], m["strategy_hash"], m["explanation"]]
+            for m in available(load_spec())]))
+        docs = comparisons(ws) if ws.db is not None else []
+        out.append("<h2>Comparisons</h2>" + table(["Comparison", "Dataset", "Symbols", "Strategies", "Ranking",
+                                                   "Created"], [
+            [link(f"/lab/{d['comparison_id']}", d["comparison_id"]), d["dataset_id"], ",".join(d["symbols"]),
+             len(d["runs"]), d["ranking"]["state"], d["created_at_utc"]] for d in docs], raw_cols=(0,)))
+        if not docs:
+            out.append("<p class='muted'>Run <code>ayesha research lab --dataset DS --symbols EURUSD,GBPUSD</code>"
+                       ".</p>")
+        return "".join(out)
+
+    def comparison(self, ws, cid: str) -> str:
+        from ayesha.research.evaluation.comparison import find
+
+        d = find(ws, cid) if ws.db is not None else None
+        if d is None:
+            return f"<p>Unknown comparison {e(cid)}</p>"
+        out = [f"<p>{link(f'/lab/{cid}/report.md', 'Download sanitised report (Markdown)')} &nbsp; "
+               f"{link(f'/lab/{cid}/report.json', 'Download sanitised comparison (JSON)')}</p>"]
+        out.append(table(["", ""], [["Dataset", d["dataset_id"]], ["Symbols", ", ".join(d["symbols"])],
+                                    ["Split", d["split_plan_id"]], ["Costs", d["cost_model_id"]],
+                                    ["Accounts", d["account_scenario_id"]],
+                                    ["Benchmark parity", d["benchmark_parity"].get("status")],
+                                    ["Ranking", f"{d['ranking']['state']}: {d['ranking']['note']}"]]))
+        cols = ("signals", "closed_trades", "no_trade_share", "win_rate", "expectancy_r", "expectancy_r_95ci",
+                "total_r", "profit_factor", "max_drawdown_r", "positive_folds", "out_of_sample_expectancy_r",
+                "worst_cost_case_expectancy_r", "without_best_5_percent_expectancy_r", "sample")
+        out.append("<h2>Side by side (R after modelled costs)</h2>" + table(
+            ["Metric", *[r["strategy_id"] for r in d["rows"]]], [[c, *[r.get(c) for r in d["rows"]]] for c in cols]))
+        out.append("<h2>Runs</h2>" + table(["Run", "Strategy", "Kind", "Hash"], [
+            [link(f"/runs/{r['run_id']}", r["run_id"]), r["strategy_id"], r["kind"], r["strategy_hash"]]
+            for r in d["runs"]], raw_cols=(0,)))
+        diffs = d["differences_vs_baseline"]
+        if "note" not in diffs:
+            out.append("<h2>Difference to the baseline (mean R, approximate 95% interval)</h2>" + table(
+                ["Strategy", "vs", "Difference R", "95% interval", "Verdict"],
+                [[k, v["vs"], v["difference_r"], v["ci95"], v["verdict"]] for k, v in diffs.items()]))
+        for r in d["rows"]:
+            out.append(f"<h2>{e(r['strategy_id'])}: hypothetical accounts</h2>" + table(
+                ["Equity", "Taken", "End", "Return %", "Max DD %", "First blockers"],
+                [[f"${a['equity_usd']:,.0f}", a["taken"], a["end_usd"], a["return_percent"],
+                  a["max_drawdown_percent"], ", ".join(f"{k} {v}" for k, v in a["first_blockers"].items())]
+                 for a in r["accounts"]]))
+        out.append("<h2>Limitations</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in d["limitations"])
+                   + "".join(f"<li class='warn'>{e(x)}</li>" for x in d["warnings"]) + "</ul>")
+        return "".join(out)
+
+    def lab_run(self, ws, res: dict[str, Any]) -> str:
+        from ayesha.research.simulation.baseline import load_candidates
+
+        run_id, mt = res["run_id"], res["metrics"]
+        s = mt["summary"]
+        out = [f"<p>{link(f'/runs/{run_id}/report.md', 'Download sanitised report (Markdown)')} &nbsp; "
+               f"{link(f'/runs/{run_id}/report.json', 'Download sanitised result (JSON)')}</p>"]
+        out.append(table(["", ""], [
+            ["Strategy", f"{res['strategy_id']} {res['strategy_version']} hash {res['strategy_hash']}"],
+            ["Symbols", ", ".join(res.get("symbols", []))], ["Engine", res.get("engine")],
+            ["Dataset", f"{res['dataset_id']} ({res['dataset_quality']})"], ["Costs", res["cost_model_id"]],
+            ["Account scenario", res["account_scenario_id"]], ["News", res["news_snapshot_id"]],
+            ["Split", res["split_plan_id"]], ["Result hash", res["result_sha256"]],
+            ["Code", f"{res['commit_sha'][:12]} / desktop {res['desktop_version']}"]]))
+        out.append("<h2>Limitations</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in res["limitations"])
+                   + "".join(f"<li class='warn'>{e(x)}</li>" for x in res["warnings"]) + "</ul>")
+        out.append("<h2>Summary (R after modelled costs)</h2>" + table(["", ""], [
+            [k, s[k]] for k in ("signals", "closed_trades", "no_trade_share", "not_filled_share", "win_rate",
+                                "win_rate_95ci", "expectancy_r", "expectancy_r_95ci", "median_r", "total_r",
+                                "profit_factor", "max_drawdown_r", "longest_losing_streak", "planned_net_rr_median",
+                                "exposure_share", "exit_reasons", "intrabar_flags")]))
+        try:
+            cands = load_candidates(ws, run_id)
+        except Exception:  # noqa: BLE001
+            cands = []
+        out.append("<h2>Cumulative R</h2>" + r_chart([c["outcome_r"] for c in cands
+                                                     if c["proposed_state"] == "HYPOTHETICAL_CLOSED"
+                                                     and c["outcome_r"] is not None]))
+        out.append("<h2>Walk-forward folds</h2>" + table(["From", "To", *self.LAB_CELLS], [
+            [f["from"][:10], f["to"][:10], *[f[c] for c in self.LAB_CELLS]] for f in mt["folds"]]))
+        if mt.get("holdout"):
+            h = mt["holdout"]
+            out.append(f"<p>Holdout: {e(h['state'])}" + (f", {e(h['orders'])} orders sealed.</p>"
+                                                         if h["state"] == "SEALED" else ".</p>"))
+        for group, cells in mt["breakdowns"].items():
+            rows = [[k, *[v.get(c) for c in self.LAB_CELLS]] for k, v in cells.items() if "closed_trades" in v]
+            if rows:
+                out.append(f"<h2>By {e(group)}</h2>" + table(["Cell", *self.LAB_CELLS], rows))
+        rob = mt.get("robustness")
+        if rob:
+            out.append("<h2>Cost sensitivity</h2>" + table(["Cost model", *self.LAB_CELLS], [
+                [k, *[v[c] for c in self.LAB_CELLS]] for k, v in rob["costs"].items()]))
+            if "note" not in rob["parameters"]:
+                out.append("<h2>Parameter perturbation</h2>" + table(["Parameter", *self.LAB_CELLS], [
+                    [k, *[v.get(c) for c in self.LAB_CELLS]] for k, v in rob["parameters"].items()]))
+        out.append("<h2>Hypothetical accounts (live risk engine, assumed contract values)</h2>" + table(
+            ["Equity", "Taken", "Closed", "End", "Return %", "Max DD %", "First blockers"],
+            [[f"${a['equity_start_usd']:,.0f}", a["taken"], a["closed"], a["equity_end_usd"], a["return_percent"],
+              a["max_drawdown_percent"], ", ".join(f"{k} {v}" for k, v in a["skipped"].items())]
+             for a in mt["account_scenarios"]]))
+        if mt.get("benchmark_parity"):
+            out.append(f"<p>Benchmark parity with the legacy replay: {e(mt['benchmark_parity']['status'])}</p>")
+        out.append(f"<h2>Research candidates ({len(cands)}, not executable)</h2>" + table(
+            ["As of (UTC)", "Pair", "Direction", "Proposed state", "Replay", "R", "Flags", "Reasons"],
+            [[c["asof_utc"], c["pair"], c["direction"], c["proposed_state"], c["replay_status"], c["outcome_r"],
+              ", ".join(c.get("flags", [])), ", ".join(c["rejection_codes"])] for c in cands[:300]]))
+        return "".join(out)
+
+    def export_comparison(self, ws, cid: str, name: str) -> tuple[int, str, bytes, dict[str, str]]:
+        from ayesha.research.evaluation.comparison import find
+        from ayesha.research.evaluation.report import comparison_json, comparison_markdown
+
+        d = find(ws, cid) if ws.db is not None else None
+        if d is None:
+            return 404, "text/html; charset=utf-8", self.page("Not found", f"<p>Unknown comparison {e(cid)}</p>"), {}
+        if name == "report.md":
+            body, ctype = comparison_markdown(d).encode("utf-8"), "text/markdown; charset=utf-8"
+        else:
+            body = json.dumps(comparison_json(d), indent=2, ensure_ascii=False).encode("utf-8")
+            ctype = "application/json; charset=utf-8"
+        safe = "".join(ch for ch in cid if ch.isalnum() or ch == "_")
+        return 200, ctype, body, {"Content-Disposition": f"attachment; filename=\"{safe}-{name}\""}
 
     def export(self, ws, run_id: str, name: str) -> tuple[int, str, bytes, dict[str, str]]:
         from ayesha.research.evaluation.report import run_json, run_markdown
@@ -536,7 +681,7 @@ def check_server(root: Path | None = None, out: Callable[[str], None] = print) -
         results.append((r.status == 405, f"POST -> {r.status} (want 405, read-only)"))
         r = _req(port, "GET", "/runs/%3Cscript%3Ealert(1)%3C%2Fscript%3E", ck)
         results.append((b"<script>" not in r.body, "page text is escaped (no script injection)"))
-        for path in ("/data", "/runs", "/legacy", "/diagnostics", "/settings", "/app.css"):
+        for path in ("/data", "/runs", "/lab", "/legacy", "/diagnostics", "/settings", "/app.css"):
             r = _req(port, "GET", path, ck)
             results.append((r.status == 200, f"{path} -> {r.status}"))
     finally:

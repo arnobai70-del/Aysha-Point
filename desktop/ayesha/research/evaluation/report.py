@@ -58,6 +58,8 @@ def run_markdown(ws: Workspace, run_id: str) -> str:
     if res["warnings"]:
         lines += ["", "## Warnings", ""] + [f"- {x}" for x in res["warnings"]]
     mt = res["metrics"]
+    if res.get("engine") == "research-runner-1":
+        return redact("\n".join(lines + _lab_sections(res)) + "\n")
     lines += ["", "## Research summary", "",
               f"Signals {mt['summary']['signals']}, closed {mt['summary']['closed_trades']}, blocked share "
               f"{mt['no_trade_share']}, not filled share {mt['not_filled_share']}, rejected setups "
@@ -66,3 +68,122 @@ def run_markdown(ws: Workspace, run_id: str) -> str:
     body = to_markdown(mt["legacy_report"]).replace("# AYESHA backtest report", "## Legacy replay report "
                                                                                  "(same code as `ayesha report`)", 1)
     return redact("\n".join(lines) + "\n" + body)
+
+
+# --- Strategy Lab runs and comparisons (v1.0.0) -------------------------------------------------
+
+def _v(x: Any) -> str:
+    if x is None:
+        return "-"
+    if isinstance(x, list):
+        return "[" + ", ".join(_v(y) for y in x) + "]"
+    return str(x).replace("|", "/")
+
+
+def _table(head: list[str], rows: list[list[Any]]) -> list[str]:
+    out = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    out += ["| " + " | ".join(_v(c) for c in r) + " |" for r in rows]
+    return out
+
+
+CELLS = ("closed_trades", "win_rate", "expectancy_r", "expectancy_r_95ci", "total_r", "profit_factor",
+         "max_drawdown_r", "sample")
+
+
+def _lab_sections(res: dict[str, Any]) -> list[str]:
+    mt = res["metrics"]
+    s = mt["summary"]
+    out = ["", "## Summary (after costs, in R)", "",
+           f"Symbols {', '.join(res.get('symbols', []))}; bars {mt['bars']} (M15); engine {mt['engine']}.", ""]
+    keys = ("signals", "closed_trades", "no_trade_share", "not_filled_share", "win_rate", "win_rate_95ci",
+            "expectancy_r", "expectancy_r_95ci", "median_r", "total_r", "avg_win_r", "avg_loss_r",
+            "planned_net_rr_median", "profit_factor", "max_drawdown_r", "longest_losing_streak",
+            "longest_trades_below_peak", "r_p05", "r_p95", "worst_r", "best_r", "sharpe_per_trade",
+            "exposure_share", "exit_reasons", "intrabar_flags")
+    out += _table(["Metric", "Value"], [[k, s[k]] for k in keys])
+    out += ["", f"Rejected setups: {mt['rejections'] or 'none'}"]
+    out += ["", "## Walk-forward folds", ""]
+    out += _table(["From", "To", "Signals", *CELLS, "Ending after fold"],
+                  [[f["from"], f["to"], f["signals"], *[f[c] for c in CELLS], f["orders_ending_after_fold"]]
+                   for f in mt["folds"]])
+    out += ["", f"Positive folds: {mt['positive_folds']} of {mt['folds_with_trades']} with trades."]
+    for name in ("in_sample", "out_of_sample"):
+        if mt.get(name):
+            out += ["", f"{name.replace('_', ' ').capitalize()}: " + ", ".join(f"{c} {_v(mt[name][c])}"
+                                                                              for c in CELLS)]
+    if mt.get("holdout"):
+        h = mt["holdout"]
+        out += ["", f"Holdout: {h['state']}" + (f", {h['orders']} orders sealed ({h['note']})" if h["state"] ==
+                                                 "SEALED" else ": " + ", ".join(f"{c} {_v(h[c])}" for c in CELLS))]
+    out += ["", "## Breakdowns", ""]
+    for group, cells in mt["breakdowns"].items():
+        rows = [[f"{group}={k}", *[v.get(c) for c in CELLS]] for k, v in cells.items() if "closed_trades" in v]
+        if rows:
+            out += _table(["Cell", *CELLS], rows) + [""]
+    out += ["Regime: not modelled yet (v1.1.0)."]
+    rob = mt.get("robustness")
+    if rob:
+        out += ["", "## Robustness", "", "Cost sensitivity (one change at a time):", ""]
+        out += _table(["Cost model", *CELLS], [[k, *[v[c] for c in CELLS]] for k, v in rob["costs"].items()])
+        out += ["", "Parameter perturbation (one step either side, within bounds):", ""]
+        if "note" in rob["parameters"]:
+            out += [rob["parameters"]["note"]]
+        else:
+            out += _table(["Parameter", *CELLS], [[k, *[v.get(c) for c in CELLS]] if "error" not in v else
+                                                  [k, v["error"], *[None] * (len(CELLS) - 1)]
+                                                  for k, v in rob["parameters"].items()])
+        w = rob["without_best_5_percent"]
+        out += ["", f"Without the best {w['removed_best_trades']} trades (5 %): expectancy {_v(w['expectancy_r'])}, "
+                    f"total {_v(w['total_r'])}.",
+                f"Without stop-and-target-on-one-bar trades: expectancy "
+                f"{_v(rob['excluding_intrabar_ambiguous']['expectancy_r'])}."]
+    out += ["", "## Hypothetical accounts (live risk engine, ASSUMED contract values)", ""]
+    out += _table(["Equity USD", "Taken", "Closed", "End USD", "Return %", "Max DD %", "Worst day USD",
+                   "First blockers"],
+                  [[a["equity_start_usd"], a["taken"], a["closed"], a["equity_end_usd"], a["return_percent"],
+                    a["max_drawdown_percent"], a["worst_day_usd"], a["skipped"]] for a in mt["account_scenarios"]])
+    if mt.get("benchmark_parity"):
+        bp = mt["benchmark_parity"]
+        out += ["", f"## Benchmark parity: {bp['status']}", "", bp["note"], ""]
+        out += _table(["Symbol", "Orders (runner, legacy)", "Equal"],
+                      [[k, v["orders"], v["equal"]] for k, v in bp["per_symbol"].items()])
+    return out
+
+
+def comparison_json(doc: dict[str, Any]) -> dict[str, Any]:
+    return redact_obj({**doc, "disclaimer": DISCLAIMER})
+
+
+def comparison_markdown(doc: dict[str, Any]) -> str:
+    lines = [f"# AYESHA Strategy Lab comparison {doc['comparison_id']}", "", f"> {DISCLAIMER}", "",
+             f"Dataset {doc['dataset_id']}, symbols {', '.join(doc['symbols'])}, split {doc['split_plan_id']}, "
+             f"costs {doc['cost_model_id']}, accounts {doc['account_scenario_id']}, created {doc['created_at_utc']}.",
+             ""]
+    lines += _table(["Run", "Strategy", "Kind", "Version", "Hash"],
+                    [[r["run_id"], r["strategy_id"], r["kind"], r["strategy_version"], r["strategy_hash"]]
+                     for r in doc["runs"]])
+    cols = ("signals", "closed_trades", "no_trade_share", "win_rate", "expectancy_r", "expectancy_r_95ci",
+            "total_r", "profit_factor", "max_drawdown_r", "positive_folds", "out_of_sample_expectancy_r",
+            "worst_cost_case_expectancy_r", "without_best_5_percent_expectancy_r", "sample")
+    lines += ["", "## Side by side (after costs, in R)", ""]
+    lines += _table(["Metric", *[r["strategy_id"] for r in doc["rows"]]],
+                    [[c, *[r.get(c) for r in doc["rows"]]] for c in cols])
+    lines += ["", "## Hypothetical accounts", ""]
+    for r in doc["rows"]:
+        lines += [f"{r['strategy_id']}: " + "; ".join(
+            f"${a['equity_usd']:g}: taken {a['taken']}, end {a['end_usd']}, max DD {a['max_drawdown_percent']} %"
+            for a in r["accounts"])]
+    lines += ["", "## Difference to the baseline (mean R, approximate 95 % interval)", ""]
+    d = doc["differences_vs_baseline"]
+    if "note" in d:
+        lines += [d["note"]]
+    else:
+        lines += _table(["Strategy", "vs", "Difference R", "95 % interval", "Verdict"],
+                        [[k, v["vs"], v["difference_r"], v["ci95"], v["verdict"]] for k, v in d.items()])
+    rk = doc["ranking"]
+    lines += ["", f"## Ranking: {rk['state']}", "", rk["note"] + (f": {', '.join(rk['order'])}" if rk["order"] else "")]
+    lines += ["", f"Benchmark parity (baseline through the common runner vs legacy replay): "
+                  f"{doc['benchmark_parity'].get('status')}"]
+    lines += ["", "## Limitations", ""] + [f"- {x}" for x in doc["limitations"]]
+    lines += ["", "## Warnings", ""] + [f"- {x}" for x in doc["warnings"]]
+    return redact("\n".join(lines) + "\n")

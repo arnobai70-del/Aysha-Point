@@ -223,6 +223,8 @@ Plan: [HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md). Test mapping: [RESEA
 | Worker isolation and research doctor | DONE | T07 |
 | Read-only local dashboard | DONE (code) | T08; owner PC PENDING OWNER |
 | Docs: data policy, acceptance, governance, rollback, Bangla guide | DONE | docs/RESEARCH_*.md, MODEL_GOVERNANCE.md, RELEASE_ROLLBACK.md, 12-research-guide.md |
-| Owner merge approval of the v0.9.0 pull request | OWNER | branch `research/v0.9.0` |
-| v1.0.0 to v1.3.0 (strategy lab, regimes, ML, phone research tab) | OPEN | not started; each needs the owner's go-ahead |
+| Owner merge approval of the v0.9.0 pull request | DONE | merged to `main` as `aad8dbd` by the owner |
+| v1.0.0 Strategy Lab: contract, loader, A/B/C, common runner, costs, accounts, split plan, metrics, comparison, CLI, dashboard | DONE (synthetic) | `test_strategy_lab.py`, `test_lab_runs.py`, `research_smoke.py`; real data PENDING OWNER |
+| Owner merge approval of the v1.0.0 pull request | OWNER | branch `research/v1.0.0` |
+| v1.1.0 to v1.3.0 (regimes, ML, phone research tab) | OPEN | not started; each needs the owner's go-ahead |
 

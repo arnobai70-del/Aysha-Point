@@ -1,8 +1,8 @@
-# Research acceptance (Hybrid AI plan, release 0.9.0)
+# Research acceptance (Hybrid AI plan, releases 0.9.0 and 1.0.0)
 
-What the research foundation must prove before the owner merges it, and how each point is proven. Source: plan §11
-(v0.9.0 acceptance), §12 (T01 to T12), §15 (sign-off) and tickets AI-001 to AI-007 in
-[HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md).
+What each research milestone must prove before the owner merges it, and how each point is proven. Source: plan §11
+(v0.9.0 and v1.0.0 acceptance), §12 (T01 to T12), §15 (sign-off) and tickets AI-001 to AI-009 in
+[HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md). v0.9.0 was merged as `aad8dbd`; v1.0.0 is section 1b.
 
 Status words: **CI** = automated test on GitHub Actions, Ubuntu and Windows (`research-ci` workflow, test named) ·
 **PARTIAL** = part proven, rest said · **PENDING OWNER** = needs the owner's PC, token or decision ·
@@ -23,19 +23,33 @@ market evidence, and none of it shows a trading edge.**
 | Research does not change the strategy spec, hash or wire format | CI | `test_t06_strategy_identity_unchanged` (0.4.0 / `9bb5e8ed5937`), protected files include `strategy-spec.yaml`, `signal.schema.json`, the wire fixtures and the Pine file; `generate_pine.py --check` |
 | Old Windows install and start keep working | CI (Windows) | `install.bat`, `start-ayesha.bat`, `backtest-local.bat`, `run-scanner.bat`, `make-signing-key.bat` are byte-identical (protected files); `scripts/windows_script_tests.ps1` (legacy) still runs in `ci`; `scripts/windows_research_tests.ps1` proves `start-research.bat --check` never creates `ayesha.db` |
 
+## 1b. v1.0.0 Strategy Lab acceptance criteria (plan §11, CP-04)
+
+| Criterion | Status | Evidence (`tests/research/test_strategy_lab.py`, `test_lab_runs.py`) |
+|---|---|---|
+| Replay causality for every strategy | CI | `test_future_bars_cannot_change_earlier_decisions[A/B/C]`: every bar after index K changed by 1 %; decisions made before K and orders that ended before K are identical. Strategies only see an `AsOfContext` built bar by bar; H1/H4 bars come from the legacy `Aggregator`, which never emits a partial bar |
+| Entry ambiguity inside a bar | CI | Stop wins a bar that touches stop and target, the fill bar cannot take profit (legacy fills); such orders are flagged (`test_intrabar_ambiguity_is_flagged`) and every run reports the result without them (`excluding_intrabar_ambiguous`) |
+| Old baseline benchmark parity | CI | `test_baseline_through_the_runner_equals_the_legacy_replay[seed]`: id, status, fill and exit bar, exit reason, R and blockers equal trade for trade; checked again on every lab run (`benchmark_parity`, MATCHED on CI data; `research lab` exits 1 if it is ever DIFFERENT) |
+| Identical dataset, splits and costs across strategies | CI | `test_lab_runs_every_strategy_on_the_same_inputs_and_compares_them` (one split plan id and one cost model id for all three), `test_comparison_refuses_different_inputs` (folds, symbols, robustness set, account type, holdout state), `test_split_plan_is_defined_on_the_data_not_on_trades` |
+| Parameters and strategy code versions recorded | CI | Manifest hash = parameters + version + source-file hash (`test_parameters_are_bounded_and_change_the_hash`); every run stores strategy id, version, hash, parameters hash and commit; same inputs give the same run id, `verify` recomputes (`test_lab_runs_every_strategy...`) |
+| No READY from a new plugin, experimental never pushed | CI | Research signals have ids `rs…` and grade `RESEARCH` (`test_research_signal_ids_cannot_collide_with_live_ids`); no `READY` anywhere in stored results, candidates or comparisons; candidates `executable: false`; the isolation check still forbids delivery, signing and live-registry imports and any `READY` constant in research code |
+| Small-sample warnings | CI | `SMALL_SAMPLE` limitation and a warning under 100 closed trades; cells under 30 are `INSUFFICIENT_SAMPLE`; ranking is `NO_RANKING` unless every strategy has 100+ closed trades, and is then only `IN_SAMPLE_ORDER_ONLY` (`test_metrics_keep_the_denominator_and_flag_small_samples`, `test_mean_difference_verdicts`) |
+| Exactly one experimental strategy, collisions detected, spec not writable | CI | `test_registry_has_baseline_control_and_exactly_one_experimental`, `test_baseline_is_the_frozen_live_rules_and_takes_no_parameters`, `test_loader_hands_out_a_copy_of_the_spec` |
+| Legacy path unchanged | CI | The 0.8.0 golden fingerprint and the 65 protected files are unchanged (T06 tests, all still passing) |
+
 ## 2. Tests T01 to T12 (plan §12)
 
 | # | Test | Status | Evidence |
 |---|---|---|---|
 | T01 | Snapshot hashing, replay determinism, atomic writes | CI | `test_csv_ingest_is_content_addressed_and_idempotent`, `test_tampered_artifact_is_detected_before_use`, `test_atomic_writes_leave_no_partial_files`, `test_same_inputs_same_run_id_and_hashes_and_verify`, `test_completion_is_atomic_and_never_overwrites_a_finished_run` |
-| T02 | Closed bars, as-of news, future-data mutation, no lookahead | PARTIAL | Bars: `test_t02_future_bars_cannot_change_earlier_decisions` (every bar after index K changed; earlier signals and finished trades identical), `INCOMPLETE_BAR` / `FUTURE_BAR` rejection tests. News: not modelled by the baseline (`NEWS_NOT_MODELLED` on every result); the legacy point-in-time news replay keeps its own tests (`test_zero_lookahead_future_bars_and_future_actuals_change_nothing`). Research as-of news is v1.1.0 |
-| T03 | Bid/ask, spread/slippage, stop-first, fee assumptions | PARTIAL (legacy) | The baseline reuses the legacy replay unchanged (cost model `legacy-replay-v1`: bar spread, spec slippage, stop wins a bar that touches both, commission 0 for Exness Standard); its tests stay in `test_strategy_backtest.py`. Spread +25/+50 % sensitivity and named cost models are v1.0.0 |
-| T04 | Per-pair Exness spec, Standard/Cent, min lot, hard cap, correlation | PARTIAL (legacy) | Legacy tests C04–C07, AT-11, AT-15 unchanged. Research results carry `ASSUMED_EXNESS_STANDARD_CONTRACT` and hypothetical $20–$5,000 feasibility only |
+| T02 | Closed bars, as-of news, future-data mutation, no lookahead | PARTIAL | Bars: `test_t02_future_bars_cannot_change_earlier_decisions` (every bar after index K changed; earlier signals and finished trades identical), the same for all three lab strategies (`test_future_bars_cannot_change_earlier_decisions`), `INCOMPLETE_BAR` / `FUTURE_BAR` rejection tests. News: not modelled by the baseline (`NEWS_NOT_MODELLED` on every result); the legacy point-in-time news replay keeps its own tests (`test_zero_lookahead_future_bars_and_future_actuals_change_nothing`). Research as-of news is v1.1.0 |
+| T03 | Bid/ask, spread/slippage, stop-first, fee assumptions | CI | The lab runner uses the legacy fills (bar spread, spec slippage, stop wins a bar that touches both, commission 0 for Exness Standard; legacy tests in `test_strategy_backtest.py`). Named cost models with hashes and one-change sensitivity runs (spread +25 %, +50 %, slippage +0.5 pip, one bar late): `test_cost_models_have_ids_and_hashes_and_change_one_thing`, `test_slippage_and_delay_variants`. Only BID high/low and the ASK close are known (see the plan review notes) |
+| T04 | Per-pair Exness spec, Standard/Cent, min lot, hard cap, correlation | PARTIAL | Legacy tests C04–C07, AT-11, AT-15 unchanged. The lab account simulation runs the live `risk.engine.evaluate` on a dynamic equity (`test_account_simulation_uses_the_live_gates`, `test_one_position_per_currency`). Contract values stay ASSUMED (`ASSUMED_EXNESS_STANDARD_CONTRACT`); owner-confirmed values are PENDING OWNER |
 | T05 | Research cannot write the legacy DB, leak the token or produce READY | CI | `test_t05_research_cannot_write_the_live_registry` (mode=ro), `test_live_registry_view_is_read_only_and_hides_money` (file hash before = after), `test_research_files_never_hold_the_token_or_pairing_code`, `test_a_research_decision_can_never_be_ready` (CHECK constraint), `test_research_candidate_can_never_be_ready_or_executable`, `test_outputs_are_research_only_never_ready_or_executable`, `test_static_isolation_rules_hold` |
 | T06 | `research.enabled=false` gives exact baseline output | CI | Section 1, first row; `test_research_is_off_by_default_and_creates_nothing` |
 | T07 | Worker crash, memory or overload does not affect the scanner | CI | Section 1, second row; `test_one_writer_at_a_time`, `test_a_run_left_running_by_a_dead_worker_becomes_failed_incomplete`, `test_refusals_and_failures_are_statuses_not_tracebacks` |
 | T08 | Dashboard loopback only; escaping, privacy, export redaction | CI | `test_key_cookie_host_and_methods` (401 without key, 403 for a foreign Host, 405 for POST/PUT/DELETE/PATCH, CSP without scripts), `test_values_are_escaped_and_redacted`, `test_run_page_and_sanitised_exports`, `test_pages_never_change_the_research_registry`, `test_security_self_check_passes` (`ayesha research dashboard --check`, 15 checks) |
-| T09 | Walk-forward, embargo, untouched holdout, model provenance | N/A | No ML in 0.9.0 (v1.2.0). The baseline reports the legacy walk-forward folds and an in/out-of-sample split |
+| T09 | Walk-forward, embargo, untouched holdout, model provenance | PARTIAL | No ML yet (v1.2.0). The lab has folds on the dataset's range, an optional in/out-of-sample date and a sealed holdout whose results are only computed with `--reveal-holdout`, which is a new run and an audit event (`test_holdout_stays_sealed_until_revealed`, `test_revealing_the_holdout_is_a_new_audited_run`). Embargo applies to ML labels and comes with v1.2.0 |
 | T10 | Rollback to 0.8.0 behaviour without data loss | CI | `test_cli_end_to_end_then_t10_rollback` (enable, ingest, run, verify, report, parity, backup, restore, doctor, then disable: golden files and CLI equal 0.8.0, research data kept and refused while off, enable brings it back), `test_disable_always_works_even_with_a_broken_settings_file`, Windows `windows_research_tests.ps1`. Steps: [RELEASE_ROLLBACK.md](RELEASE_ROLLBACK.md) |
 | T11 | Android old payload compatibility, signing, journal | N/A | Android is not changed in 0.9.0 (protected tree `android/app/src`); `build-android` does not run for research files, so no new APK is published |
 | T12 | Dependency lock, vulnerability scan, forbidden imports, order API | PARTIAL | `test_t12_base_dependencies_unchanged_and_versions_consistent` (base deps still `pyyaml`, `tzdata`; all version numbers agree), isolation check, order-API scan. `pip-audit` runs in `research-ci` as information only. No lock file yet: OPEN |
@@ -51,19 +65,21 @@ market evidence, and none of it shows a trading edge.**
 | AI-005 Baseline backtest parity adapter | DONE (synthetic) | `test_numbers_equal_the_legacy_report_on_the_same_bars`, `test_parity_matched_on_the_legacy_csv_round_trip`, `test_parity_explains_whole_point_spread_rounding_on_provider_data`, `test_parity_reports_real_differences`. Real-data parity: PENDING OWNER |
 | AI-006 Local research worker and health | DONE | T07 tests, `ayesha research doctor`, `ayesha research selftest` |
 | AI-007 Read-only research overview | DONE (code) | T08 tests. On the owner's PC: PENDING OWNER |
+| AI-008 StrategyProtocol and controls | DONE (synthetic) | Section 1b; experimental signals never reach READY. Real data: PENDING OWNER |
+| AI-009 Uniform cost-aware comparison | DONE (synthetic) | Section 1b; equal snapshots, split, costs and account, audit events for holdout reveals and comparisons. Real data: PENDING OWNER |
 
 ## 4. Sign-off checklist for this release (plan §15)
 
 | Item | State |
 |---|---|
-| Baseline regression tests still pass | CI: 179 legacy tests unchanged and passing, plus 113 research tests |
+| Baseline regression tests still pass | CI: 179 legacy tests unchanged and passing, plus 141 research tests |
 | No new order/modify/close endpoint | CI: order-API scan |
 | No change in NO_TRADE and READY guards | CI: protected files byte-identical, golden scanner scenarios |
 | Independent snapshot, reproducible report, event-time provenance | CI on synthetic data; PENDING OWNER on real data |
 | Nothing called "guaranteed" | Every report and dashboard page says research only, not a forecast, no validated edge |
 | Research killed or disabled ⇒ old app works; rollback tested | CI (T07, T10) |
 | Documentation and truthful status | STATUS, VERIFICATION, this file |
-| Owner merge approval | PENDING OWNER |
+| Owner merge approval | 0.9.0: given (`aad8dbd`). 1.0.0: PENDING OWNER |
 
 ## 5. What would be needed before any claim of a trading edge (plan §12)
 
@@ -73,7 +89,7 @@ None of these is met. Research results today are replays of synthetic data in CI
 |---|---|
 | ≥ 2 years of real history across the majors, quality disclosed | PENDING OWNER (`ayesha research ingest --provider oanda` on the owner's PC) |
 | Chronological in-sample and untouched out-of-sample, 4+ walk-forward folds | Tooling ready (`--split`, `--folds`); no real run |
-| Net R after costs, worst-case spread/slippage, drawdown, confidence intervals, number of independent trades | Tooling partly ready (legacy report); sensitivity runs are v1.0.0 |
+| Net R after costs, worst-case spread/slippage, drawdown, confidence intervals, number of independent trades | Tooling ready (`research lab`: after-cost R with intervals, cost and parameter sensitivity, drawdown, holdout); no real run |
 | Per-pair Exness minimum lot, stops and margin confirmed by the owner | PENDING OWNER (`ayesha confirm-broker`) |
 | ≥ 30 trading days of demo/paper forward observation | PENDING OWNER (AT-26) |
 | Historical news effects | BLOCKED_BY_DATA (no permitted point-in-time calendar) |
@@ -83,8 +99,8 @@ None of these is met. Research results today are replays of synthetic data in CI
 ```bash
 cd desktop
 pip install -e ".[dev]"
-pytest -q                                   # legacy + research (292 tests)
-pytest -q tests/research                    # research only (113 tests)
+pytest -q                                   # legacy + research (320 tests)
+pytest -q tests/research                    # research only (141 tests)
 cd ..
 python scripts/check_research_isolation.py .
 python scripts/research_smoke.py            # command line end to end in a temporary AYESHA_HOME
