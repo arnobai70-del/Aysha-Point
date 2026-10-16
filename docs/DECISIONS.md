@@ -49,6 +49,22 @@
 | 2026-10-16 | No historical calendar provider is integrated; the owner supplies a CSV they are allowed to use (`--news`). Without it the comparison is `NOT RUN (BLOCKED BY DATA)`; news direction is never backtested | No free licensed source with release times and consensus was found; the spec forbids scraping and unlicensed feeds |
 | 2026-10-16 | Tier windows and stability thresholds were fixed in `strategy-spec.yaml` before any real-data run; the report never tunes them | Spec P2: no retrospective tuning |
 
+### Hybrid Advanced AI plan v1.0 (release 0.9.0)
+
+| Date | Decision | Why |
+|---|---|---|
+| 2026-10-16 | **Each plan milestone goes on its own branch and pull request** (`research/v0.9.0`); `main` changes only after the owner approves the merge | Owner's choice on the decision card; plan §14 |
+| 2026-10-16 | Research is a subcommand (`ayesha research …`) of the existing CLI, imported only by that subcommand; not a second executable | One install; old argv, help and exit codes untouched (golden CLI fingerprint) |
+| 2026-10-16 | Research is **off by default**; its safety locks (no promotion, no live hooks, no ML, no outside model calls, redaction, loopback dashboard) are constants in the config schema, so an edited file can only switch research off | Plan §2.4 and §10.2: a YAML file alone must not be able to loosen anything |
+| 2026-10-16 | Dashboard = Python standard library web page on 127.0.0.1 with a one-time key, Host check and GET only; no PySide6 | Plan allows either; this adds no dependency (~200 MB saved) and has no state-changing request to forge |
+| 2026-10-16 | No new dependency in 0.9.0 (base stays `pyyaml`, `tzdata`); `[research]`, `[ml]`, `[ui]` extras only when a milestone needs them | Plan §3: keep the base install light |
+| 2026-10-16 | Heavy research jobs run in a separate low-priority worker process with memory/CPU limits and a timeout (Windows job object, POSIX nice + RLIMIT_AS), one writer at a time | Plan §2.4: a research crash or memory blow-up must not touch the scanner |
+| 2026-10-16 | Datasets are frozen and content-addressed; quality PASS / DEGRADED / REJECTED; REJECTED is never run, DEGRADED only with `--allow-degraded` and labelled; nothing is filled in or repaired; ASK high/low are never invented | Plan §5.1–5.2 |
+| 2026-10-16 | Parity statuses: `MATCHED`, `MATCHED_WITH_EXPLAINED_DIFFERENCES` (only sub-point spread rounding of the CSV export), `DIFFERENT` | The CSV export stores whole-point spreads (CP-00 finding 6); any other difference must be shown, not explained away |
+| 2026-10-16 | `build-android` no longer runs for `contracts/research/**`, `contracts/version.json` or edits of its own workflow file | Otherwise the merge would publish a phantom APK with a new CI debug signer and force a phone reinstall (CP-00 finding 7) |
+| 2026-10-16 | The plan's `ayesha broker` is read as the existing `ayesha confirm-broker`; `ayesha.__version__` corrected to the package version | CP-00 findings 1 and 3 |
+| 2026-10-16 | The golden fingerprint of 0.8.0 (`tests/research/fixtures/legacy-golden-0.8.0.json`) may only be regenerated for an owner-approved change of the legacy path, recorded here | Plan §13: an unexpected legacy difference fails the release; it is never fixed by relabelling |
+
 ## Delivery modes
 - **Mode B, PC scanner (canonical, free):** OANDA data → rules + all gates → signed ntfy push → AYESHA app inbox.
   Needs the PC on and online; the app shows PC offline / stopped / data stale.
