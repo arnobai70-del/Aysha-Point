@@ -304,14 +304,29 @@ def _ask(prompt: str) -> str:
 
 
 def _parse_positions(raw: str):
+    """Open trades typed as `PAIR SIDE [$RISK]`. The optional amount is the USD the trade would lose at
+    its stop-loss, written `$0.50` or `risk=0.50`. A bare number is refused: it reads like a lot size,
+    and an understated risk would let new trades past the 1 % open-risk cap. Without an amount the
+    trade counts as the whole open-risk cap."""
     from ayesha.capital import validate_position
 
     out = []
     for part in [x.strip() for x in raw.split(",") if x.strip()]:
         bits = part.split()
         if len(bits) not in (2, 3):
-            raise ValueError(f"write each trade as PAIR SIDE [risk USD], e.g. EURUSD BUY 0.50 (got {part!r})")
-        out.append(validate_position(*bits))
+            raise ValueError(f"write each trade as PAIR SIDE [$risk], e.g. EURUSD BUY $0.50 (got {part!r})")
+        risk = None
+        if len(bits) == 3:
+            r = bits[2].lower()
+            if r.startswith("$"):
+                risk = r[1:]
+            elif r.startswith("risk="):
+                risk = r[5:]
+            else:
+                raise ValueError(f"is {bits[2]} the lot size? Type the USD this trade would lose at its stop-loss "
+                                 f"with a $ sign (e.g. ${bits[2]}), or leave it out: the trade then counts as the "
+                                 "whole 1% open risk")
+        out.append(validate_position(bits[0], bits[1], risk))
     return out
 
 
@@ -343,7 +358,8 @@ def _capital_prompt(book, account_type: str) -> int:
             reason, amount = ("DEPOSIT", eq - cur.equity) if k == "D" else ("WITHDRAWAL", cur.equity - eq)
             amount = abs(round(amount, 2)) or 0.01
     while True:
-        raw = _ask('Open trades in Exness right now? Enter = none, or e.g. "EURUSD BUY 0.50, GBPUSD SELL": ')
+        raw = _ask('Open trades in Exness right now? Enter = none, or PAIR SIDE [$ lost at its stop-loss, not the lot], '
+                   'e.g. "EURUSD BUY $0.50, GBPUSD SELL": ')
         try:
             positions = _parse_positions(raw)
             break
@@ -990,7 +1006,8 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--deposit", type=float, help="this update follows a deposit of this amount")
     g.add_argument("--withdrawal", type=float, help="this update follows a withdrawal of this amount")
     g.add_argument("--confirm", action="store_true", help="equity unchanged, just re-confirming")
-    s.add_argument("--positions", help='open trades, e.g. "EURUSD BUY 0.50,GBPUSD SELL"')
+    s.add_argument("--positions", help='open trades as PAIR SIDE [$ lost at its stop-loss, not the lot], '
+                   'e.g. "EURUSD BUY $0.50,GBPUSD SELL"')
     s.add_argument("--no-positions", action="store_true", help="confirm there are no open trades")
     s.add_argument("--free-margin", help="free margin shown in Exness (needed with open trades)")
     s.add_argument("--show", action="store_true", help="print the latest snapshot and whether it is valid")

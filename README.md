@@ -77,7 +77,7 @@ desktop/ayesha/  risk/ feed/ (MT5 read-only, OANDA v20 read-only, CSV) broker.py
                  rules/ (primitives, strategy, mtf) news/ (calendar, classify, guard, ledger, analysis, ff_feed)
                  backtest/ (replay, report, asof) sessions.py scanner.py doctor.py cli.py
 desktop/windows/ install.bat, start-ayesha.bat, backtest-local.bat
-desktop/tests/   178 tests: risk gates, DST sessions, primitives, zero-lookahead, MTF/M5 confirmation, news N01–N12,
+desktop/tests/   179 tests: risk gates, DST sessions, primitives, zero-lookahead, MTF/M5 confirmation, news N01–N12,
                  capital C01–C10, point-in-time news replay, report, scanner, OANDA feed, push signing, doctor, safety
 scripts/         check_no_order_api.py (CI fails on any trading call), check_no_secrets.py, check_workflows.py
 tradingview/     AyeshaSmartMoney.pine (generated chart helper) + template

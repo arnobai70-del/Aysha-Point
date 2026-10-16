@@ -78,7 +78,7 @@ fixture data: none of these proves that the strategy or the news protection make
 | C03 | Standard USD vs Cent distinct; OANDA balance never used as Exness capital | CI | `test_c03_cent_and_standard_are_distinct_and_oanda_balance_is_never_used` |
 | C04 | Per-symbol Exness spec; EURUSD confirmation never reused | CI | `test_c04_broker_spec_is_per_symbol` (also an old one-record file confirms EURUSD only). Owner values: PENDING OWNER |
 | C05 | Lot floors to step, hard cap holds, stop never narrowed | CI | `test_c05_lot_floors_hard_cap_holds_and_stop_is_never_moved`; Kotlin `lotFloorsNeverRoundsUp`, `pcLotIsNeverExceededOnThePhone` |
-| C06 | Unknown positions, stale margin, correlation, daily loss, two losses, open risk block | CI | `test_c06_positions_margin_exposure_and_daily_limits` |
+| C06 | Unknown positions, stale margin, correlation, daily loss, two losses, open risk block | CI | `test_c06_positions_margin_exposure_and_daily_limits`, `test_c06_open_trade_risk_needs_a_dollar_sign_so_a_lot_is_never_read_as_risk` |
 | C07 | Min lot above budget at $25 ⇒ NO_TRADE with USD and %; same geometry feasible at higher equity | CI | `test_c07_min_lot_explanation_at_25_and_same_geometry_feasible_later` ($2.11 = 8.44 % at $25; 0.01 lot at $500) |
 | C08 | Deposit/withdrawal not trade P&L; journal separate from tests | CI | `test_c08_deposits_are_not_trading_pnl`, `test_b4_weekly_drawdown_excludes_cash_flows_and_is_only_a_warning`; Kotlin `journalStatsUseOnlyTypedResults` |
 | C09 | Update Capital persists and refreshes PC sizing; phone mismatch visible; no equity on the relay | CI | `test_c09_capital_updates_reach_the_scanner_and_never_the_relay`; Kotlin `capitalDigestMatchesPythonVector`, `heartbeatCarriesPcCapitalStatus`. Phone screen: PENDING OWNER |

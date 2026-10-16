@@ -619,6 +619,19 @@ def test_c06_positions_margin_exposure_and_daily_limits(spec, tmp_path):
     assert "DAILY_RISK_PAUSE" in d.blockers and d.lot == 0
 
 
+def test_c06_open_trade_risk_needs_a_dollar_sign_so_a_lot_is_never_read_as_risk():
+    from ayesha.cli import _parse_positions
+
+    p = _parse_positions("EURUSD BUY $0.50, gbpusd sell, USDJPY SELL risk=1.2")
+    assert [(x.symbol, x.direction, x.risk_usd) for x in p] == [("EURUSD", "BUY", 0.5), ("GBPUSD", "SELL", None),
+                                                                ("USDJPY", "SELL", 1.2)]
+    with pytest.raises(ValueError, match="lot size"):
+        _parse_positions("EURUSD BUY 0.50")  # 0.50 lot would risk far more than $0.50
+    for bad in ("EURUSD BUY $-1", "EURUSD BUY $nan", "EURUSD BUY $abc", "EURUSD", "EURUSD HOLD"):
+        with pytest.raises((ValueError, capmod.CapitalError)):
+            _parse_positions(bad)
+
+
 def test_c07_min_lot_explanation_at_25_and_same_geometry_feasible_later():
     d25 = evaluate(_prop(), _inst(), AccountState(25, free_margin_usd=25), RiskConfig())
     assert d25.blockers == ["MIN_LOT_EXCEEDS_RISK"]
