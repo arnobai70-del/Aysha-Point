@@ -121,6 +121,33 @@
     },
     "explanation": {
       "type": "string"
+    },
+    "flags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "intrabar ambiguity and similar notes (v1.0.0 lab runs)"
+    },
+    "fill_utc": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "utc-date-time"
+    },
+    "exit_utc": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "utc-date-time"
+    },
+    "exit_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   }
 }

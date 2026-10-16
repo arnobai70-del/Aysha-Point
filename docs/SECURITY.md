@@ -1,4 +1,4 @@
-# Security notes (credentials, workflows, signing, capital, research) — release 0.9.0
+# Security notes (credentials, workflows, signing, capital, research) — release 1.0.0
 
 The repository is **public**. Nothing secret may ever be committed; CI enforces this with
 `scripts/check_no_secrets.py` (OANDA-token shape, private keys, keystores, GitHub/AWS/Telegram tokens).
@@ -51,7 +51,7 @@ signs the APK (`Signing self-test` step) and prints the signer SHA-256 in each r
 - **Orders:** news, capital and scores can only block. Nothing in the PC or phone code can place, modify or close an
   order (`scripts/check_no_order_api.py`).
 
-## Research plane (0.9.0)
+## Research plane (0.9.0, Strategy Lab 1.0.0)
 - **Off by default.** Nothing under `%AYESHA_HOME%\research\` exists until `ayesha research enable`. The scanner
   never imports research (CI isolation check), and research cannot import the phone delivery, signing, capital,
   credential or live-registry code, `pickle`/`marshal`/`shelve`, or call `eval`/`exec`/`os.system`/`shell=True`.
@@ -71,6 +71,10 @@ signs the APK (`Signing self-test` step) and prints the signer SHA-256 in each r
   `ayesha research dashboard --check` runs 15 of these checks against a live instance. Do not share the printed link.
 - **Integrity:** artifacts are content-addressed and re-hashed on every read; the registry has a hash-linked audit
   trail; backups are integrity-checked with a `.sha256` file; a restore refuses tampered or foreign files.
+- **Strategy Lab (1.0.0):** strategies are built-in classes from the repository only (no loading of outside files, no
+  `importlib` of user paths); they receive a copy of the spec and only closed bars; research signal ids (`rs…`) and
+  the `RESEARCH` grade cannot be mistaken for live ones. The same isolation rules cover the new modules, and the
+  comparison and lab pages go through the same escaping, redaction and GET-only dashboard. No new network access.
 - **Supply chain:** no new dependency. `pip-audit` runs in `research-ci` as information; the `research-ci` workflow
   has `permissions: contents: read` and `persist-credentials: false` and uses no secret.
 - **Data:** owner datasets, `research.db`, reports and logs stay on the PC; only synthetic test data is in the

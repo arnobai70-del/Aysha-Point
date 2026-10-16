@@ -26,6 +26,7 @@ SCHEMAS = {
     "research.result/1": "research-result.schema.json",
     "research.strategy/1": "strategy-plugin.schema.json",
     "research.model_card/1": "model-card.schema.json",
+    "research.comparison/1": "comparison.schema.json",
 }
 SUPPORTED = {"$schema", "$id", "$comment", "title", "description", "examples", "default", "type", "enum", "const",
              "required", "properties", "additionalProperties", "items", "minItems", "maxItems", "uniqueItems",

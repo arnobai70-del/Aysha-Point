@@ -3,8 +3,9 @@
     python scripts/research_smoke.py
 
 Runs `python -m ayesha.cli research ...` as separate processes, the way an owner would, and checks exit codes and
-key lines: off by default, enable, ingest, inspect, run, verify, report, parity, backup, restore, doctor, selftests,
-dashboard security check, disable (legacy_only) and refusal while off.
+key lines: off by default, enable, ingest, inspect, run, verify, report, parity, the Strategy Lab (strategies, lab,
+one lab run with verify, compare, comparison report), backup, restore, doctor, selftests, dashboard security check,
+disable (legacy_only) and refusal while off.
 """
 
 from __future__ import annotations
@@ -54,6 +55,17 @@ def main() -> int:
              "--verify"], 0, ("VERIFIED",), env)
         run(["report", rid], 0, ("RESEARCH ONLY", "Legacy replay report"), env)
         run(["parity", "--dataset", ds, "--symbol", "EURUSD", "--mode", "m5confirm"], 0, ("Parity MATCHED",), env)
+        run(["strategies"], 0, ("baseline-sweep-mss-fvg", "control-london-orb", "experimental-h1h4-trend"), env)
+        out = run(["lab", "--dataset", ds, "--symbols", "EURUSD", "--quick", "--holdout", "2025-04-01"], 0,
+                  ("benchmark parity MATCHED", "ranking NO_RANKING"), env)
+        cid = re.search(r"Comparison (cmp_[0-9a-f]{16})", out).group(1) if "Comparison cmp_" in out else "cmp_missing"
+        run(["report", cid], 0, ("RESEARCH ONLY", "Side by side"), env)
+        out = run(["run", "control-london-orb", "--dataset", ds, "--symbol", "EURUSD", "--quick"], 0,
+                  ("COMPLETED",), env)
+        run(["run", "control-london-orb", "--dataset", ds, "--symbol", "EURUSD", "--quick", "--verify"], 0,
+            ("VERIFIED",), env)
+        b = re.search(r"Run (run_[0-9a-f]{16})", out).group(1) if "Run run_" in out else "run_missing"
+        run(["compare", rid, b], 2, ("not a Strategy Lab run",), env)
         out = run(["backup"], 0, ("integrity ok",), env)
         m = re.search(r"Backup: (\S+)", out)
         run(["restore", m.group(1) if m else "missing", "--yes"], 0, ("Restored",), env)

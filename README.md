@@ -51,7 +51,7 @@ bars (spread, range, shock, whipsaw) before an entry can be READY. A missing, st
 never a trade signal; the numbers analysis (actual vs forecast) only gives conditional scenarios and says `UNKNOWN`
 or `BLOCKED BY DATA` when numbers are missing. **News direction is not backtested.**
 
-## Research plane (0.9.0, off by default)
+## Research plane (0.9.0 foundation, 1.0.0 Strategy Lab; off by default)
 
 A separate, research-only part for frozen historical datasets and reproducible replays of the unchanged live rules.
 It is **OFF by default** (`legacy_only`), never produces READY, never sends anything to the phone and places no
@@ -62,6 +62,9 @@ fingerprint of 0.8.0).
 python -m ayesha.cli research enable
 python -m ayesha.cli research ingest --provider oanda --pairs EURUSD --days 730     # or --from-csv-dir FOLDER
 python -m ayesha.cli research run baseline-sweep-mss-fvg --dataset ds_... --symbol EURUSD --split 2025-01-01
+python -m ayesha.cli research strategies                                             # A baseline, B control, C experimental
+python -m ayesha.cli research lab --dataset ds_... --symbols EURUSD,GBPUSD --holdout 2026-01-01
+python -m ayesha.cli research report cmp_... --md lab.md                             # side-by-side comparison
 python -m ayesha.cli research report run_... --md report.md
 python -m ayesha.cli research dashboard                                              # 127.0.0.1 only, read-only
 python -m ayesha.cli research disable                                                # back to legacy_only, data kept
@@ -69,7 +72,10 @@ python -m ayesha.cli research disable                                           
 
 Each dataset gets a quality decision (PASS / DEGRADED / REJECTED) and is never repaired or filled in; runs are
 identified by the hash of every input and can be re-verified (`--verify`). Heavy jobs run in a separate, limited
-worker process. Data policy: [`docs/RESEARCH_DATA_POLICY.md`](docs/RESEARCH_DATA_POLICY.md) · acceptance:
+worker process. The Strategy Lab (1.0.0) replays the frozen baseline, one control rule (London opening-range
+breakout) and one experimental rule (H1/H4 trend continuation) through one common runner with the legacy fills and
+gates, then compares them on the same data, split, costs and hypothetical accounts; a comparison never ranks
+strategies with fewer than 100 closed trades and never promotes anything. Data policy: [`docs/RESEARCH_DATA_POLICY.md`](docs/RESEARCH_DATA_POLICY.md) · acceptance:
 [`docs/RESEARCH_ACCEPTANCE.md`](docs/RESEARCH_ACCEPTANCE.md) · governance:
 [`docs/MODEL_GOVERNANCE.md`](docs/MODEL_GOVERNANCE.md) · rollback: [`docs/RELEASE_ROLLBACK.md`](docs/RELEASE_ROLLBACK.md).
 Research results are historical simulations, not forecasts; there is still no validated trading edge.
@@ -93,23 +99,25 @@ Research results are historical simulations, not forecasts; there is still no va
 | `ayesha setup` / `ayesha set-token` | One-time setup (used by install.bat); token typed hidden, stored in the Windows user environment | No |
 | `ayesha backtest-run --pairs EURUSD --days 1095 [--news calendar.csv]` | Validated OANDA export (M15 + M5) + validation report | No |
 | `ayesha make-signing-key` | Stable Android release key (PKCS#12) and the four GitHub secret values | No |
-| `ayesha research …` | Research plane (off by default): `status`, `enable`/`disable`, `doctor`, `ingest`, `datasets`, `inspect`, `run`, `runs`, `report`, `parity`, `backup`, `restore`, `dashboard`, `selftest` | No |
+| `ayesha research …` | Research plane (off by default): `status`, `enable`/`disable`, `doctor`, `ingest`, `datasets`, `inspect`, `strategies`, `run`, `lab`, `compare`, `comparisons`, `runs`, `report`, `parity`, `backup`, `restore`, `dashboard`, `selftest` | No |
 
 ## Layout
 
 ```
 contracts/       strategy-spec.yaml (canonical rules incl. news tiers and capital policy, hashed), signal.schema.json (1.1),
                  research/ (research-only schemas: config, market bar, quality report, dataset manifest, candidate, result,
-                 strategy, model card)
+                 strategy, comparison, model card)
 desktop/ayesha/  risk/ feed/ (MT5 read-only, OANDA v20 read-only, CSV) broker.py capital.py delivery/ (console, Telegram, ntfy push)
                  rules/ (primitives, strategy, mtf) news/ (calendar, classify, guard, ledger, analysis, ff_feed)
                  backtest/ (replay, report, asof) sessions.py scanner.py doctor.py cli.py
-                 research/ (off by default: datasets, storage, simulation, evaluation, worker, dashboard, doctor, cli)
+                 research/ (off by default: datasets, storage, strategies, simulation, evaluation, worker, dashboard,
+                 doctor, cli)
 desktop/windows/ install.bat, start-ayesha.bat, backtest-local.bat; optional start-research.bat, backup-research.bat
-desktop/tests/   292 tests. Legacy (179): risk gates, DST sessions, primitives, zero-lookahead, MTF/M5 confirmation,
+desktop/tests/   320 tests. Legacy (179): risk gates, DST sessions, primitives, zero-lookahead, MTF/M5 confirmation,
                  news N01–N12, capital C01–C10, point-in-time news replay, report, scanner, OANDA feed, push signing,
-                 doctor, safety. research/ (113): 0.8.0 golden fingerprint, data quality, registry, baseline and
-                 parity, worker isolation, dashboard security, rollback
+                 doctor, safety. research/ (141): 0.8.0 golden fingerprint, data quality, registry, baseline and
+                 parity, Strategy Lab (contract, runner, causality, costs, accounts, split, comparison), worker
+                 isolation, dashboard security, rollback
 scripts/         check_no_order_api.py (CI fails on any trading call), check_no_secrets.py, check_workflows.py,
                  check_research_isolation.py, research_smoke.py
 tradingview/     AyeshaSmartMoney.pine (generated chart helper) + template

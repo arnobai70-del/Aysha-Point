@@ -120,6 +120,9 @@ class ReadOnlyRegistry:
     def events(self, limit: int = 50) -> list[sqlite3.Row]:
         return self._all("SELECT * FROM research_events ORDER BY id DESC LIMIT ?", limit)
 
+    def artifacts(self) -> list[sqlite3.Row]:
+        return self._all("SELECT * FROM artifacts ORDER BY created_utc, kind, sha256")
+
 
 class ReadOnlyWorkspace:
     """Duck-typed `Workspace` for readers: registry opened read-only, artifacts read through their hash check."""

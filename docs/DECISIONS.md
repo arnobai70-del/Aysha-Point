@@ -65,6 +65,21 @@
 | 2026-10-16 | The plan's `ayesha broker` is read as the existing `ayesha confirm-broker`; `ayesha.__version__` corrected to the package version | CP-00 findings 1 and 3 |
 | 2026-10-16 | The golden fingerprint of 0.8.0 (`tests/research/fixtures/legacy-golden-0.8.0.json`) may only be regenerated for an owner-approved change of the legacy path, recorded here | Plan §13: an unexpected legacy difference fails the release; it is never fixed by relabelling |
 
+### Strategy Lab (release 1.0.0)
+
+| Date | Decision | Why |
+|---|---|---|
+| 2026-10-16 | v1.0.0 on its own branch `research/v1.0.0` and pull request, like v0.9.0 | Owner's choice for every milestone |
+| 2026-10-16 | Control B = **London opening-range breakout** (first hour from the London open, breakout close beyond the range, stop at the other side, net 2R) | Plan §6.1 "simple session/volatility baseline": a well-known rule with no smart-money concept, so it shows whether A's complexity adds anything. Fixed before any real data was seen |
+| 2026-10-16 | Experimental C = **H4 EMA trend + H1 pullback to its EMA, entry on resumption** | Plan §6.1 names H1/H4 trend continuation; exactly one experimental strategy (§11). Experimental D (order blocks, breakers) is not built |
+| 2026-10-16 | One common runner that calls the legacy fill functions (`backtest.replay._pending/_market/_open`) and the live risk engine's gates instead of a new simulator | Same fills and costs for every strategy, and the baseline reproduces the legacy replay trade for trade, which is checked on every lab run. A copy could drift |
+| 2026-10-16 | The lab compares on M15 bars; A's M5-confirmation mode stays on the 0.9.0 path | B and C are defined on closed M15/H1/H4 bars; mixing confirmation timeframes would make the comparison unequal |
+| 2026-10-16 | News is not modelled in the lab (the strict live news gate is off in research and every result says `NEWS_NOT_MODELLED`) | No permitted point-in-time historical calendar (BLOCKED BY DATA); v1.1.0 |
+| 2026-10-16 | The account simulation uses the live `risk.engine.evaluate` on a changing hypothetical equity, with ASSUMED Exness Standard contract values | The same gates the scanner uses (1 % cap, minimum lot, daily loss, open risk, correlation); owner-confirmed historical contract values do not exist |
+| 2026-10-16 | Ranking only when every strategy has 100+ closed trades, and then only as `IN_SAMPLE_ORDER_ONLY` | Plan §7.2 and §12: small samples prove nothing; hindsight order is not a promotion |
+| 2026-10-16 | Comparisons stored as `exports` artifacts plus audit events, no registry migration | 0.9.0 can still open the research folder after a rollback (RELEASE_ROLLBACK Level 3b) |
+| 2026-10-16 | `research_contracts` 1 → 2 | New `research.comparison/1` schema and additive optional fields on result, candidate and strategy manifests; nothing removed |
+
 ## Delivery modes
 - **Mode B, PC scanner (canonical, free):** OANDA data → rules + all gates → signed ntfy push → AYESHA app inbox.
   Needs the PC on and online; the app shows PC offline / stopped / data stale.

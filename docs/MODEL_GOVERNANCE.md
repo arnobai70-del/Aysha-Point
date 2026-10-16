@@ -3,8 +3,9 @@
 Who may decide what. Applies to every research strategy, regime label and (later) machine-learning model. Source:
 plan §0, §2.4, §6.2, §8 and §16 in [HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md).
 
-**Release 0.9.0 contains no machine-learning model and no LLM.** The only research strategy is the frozen legacy
-baseline `baseline-sweep-mss-fvg`, replayed on frozen data. There is no validated trading edge yet.
+**Release 1.0.0 contains no machine-learning model and no LLM.** The research strategies are the frozen legacy
+baseline `baseline-sweep-mss-fvg` (A), the control `control-london-orb` (B) and the one experimental strategy
+`experimental-h1h4-trend` (C), all replayed on frozen data. None of them is validated; there is no trading edge yet.
 
 ## 1. Authority
 
@@ -17,7 +18,7 @@ baseline `baseline-sweep-mss-fvg`, replayed on frozen data. There is no validate
 4. Research output is labelled `RESEARCH`, `executable: false`, and is shown as **RESEARCH ONLY / HYPOTHETICAL**. It
    never uses the word READY.
 
-## 2. Locks enforced in code (0.9.0)
+## 2. Locks enforced in code (0.9.0, extended in 1.0.0)
 
 | Lock | Where | Effect if someone edits it |
 |---|---|---|
@@ -27,12 +28,17 @@ baseline `baseline-sweep-mss-fvg`, replayed on frozen data. There is no validate
 | Strategies are research-only | `research.strategy/1`: `research_only: true`, `execution_level: NONE`; `strategy_definitions.status` can only be `RESEARCH_ONLY` | Validation or insert fails (`test_strategy_manifest_must_be_research_only`) |
 | No silent strategy change | A strategy id and version are bound to one hash and parameter hash | A changed hash needs a new version (`test_strategy_hash_collision_needs_a_new_version`) |
 | No READY in research code | The isolation check flags the value `"READY"` in any module under `ayesha/research/` | CI fails (`test_isolation_check_catches_violations`) |
+| Exactly the registered strategies, exactly one experimental | `strategies/loader.py` registry: duplicate ids or a second `EXPERIMENTAL` stop every load; parameters outside their registered bounds, unknown parameters and any parameter for the baseline are refused | `StrategyError`, the run is refused (`test_registry_has_baseline_control_and_exactly_one_experimental`, `test_parameters_are_bounded_and_change_the_hash`) |
+| Research signals look nothing like live ones | ids `rs` + hash of strategy, version, pair, time, direction, entry; grade `RESEARCH`; no score | `test_research_signal_ids_cannot_collide_with_live_ids` |
+| A comparison never promotes | `research.comparison/1`: `executable: false`, ranking only `NO_RANKING` or `IN_SAMPLE_ORDER_ONLY`; refused unless dataset, symbols, split, holdout state, costs and account are identical | `test_comparison_refuses_different_inputs` |
+| The holdout is looked at on purpose | Results after `--holdout` are only computed with `--reveal-holdout`, a separate run recorded as `HOLDOUT_REVEALED` in the audit trail | `test_revealing_the_holdout_is_a_new_audited_run` |
 
 ## 3. Strategy registration (v1.0.0 onwards)
 
-Every strategy carries a `research.strategy/1` manifest: id, explanation, timeframes, symbols, parameters, lookback,
-statefulness, version and hash, `kind` (`BASELINE`, `CONTROL`, `EXPERIMENTAL`), news and cost sources,
-`research_only: true`, `execution_level: NONE`. Rules:
+Every strategy carries a `research.strategy/1` manifest: id, explanation, timeframes, symbols, parameters with their
+bounds, dependencies, lookback, statefulness, version and hash, `kind` (`BASELINE`, `CONTROL`, `EXPERIMENTAL`), news
+and cost sources, `research_only: true`, `execution_level: NONE`. The hash covers the version, the parameters and the
+strategy's source file, so editing the code without a new version is visible. Rules:
 
 - Only built-in modules from the repository are loaded; arbitrary Python files are not plugins (a plugin is not a
   security sandbox).
@@ -41,6 +47,8 @@ statefulness, version and hash, `kind` (`BASELINE`, `CONTROL`, `EXPERIMENTAL`), 
 - All strategies in a comparison use the same frozen dataset, split and cost model; small samples are labelled
   (`SMALL_SAMPLE` below 100 closed trades) and never ranked as winners.
 - A strategy that looks best in hindsight does not become live. See section 5.
+- Changing a rule or a default of B or C means a new version and a new hash; old runs keep their old id. Adding a
+  second experimental strategy (plan Experimental D) is a new milestone, not an edit.
 
 ## 4. Machine learning (v1.2.0, optional, only with enough validated real data)
 

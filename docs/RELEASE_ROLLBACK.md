@@ -1,6 +1,8 @@
-# Release and rollback (research plane, release 0.9.0)
+# Release and rollback (research plane, releases 0.9.0 and 1.0.0)
 
-Release 0.9.0 adds the research plane next to the 0.8.0 advisory path. It changes no legacy behaviour (golden
+Release 1.0.0 adds the Strategy Lab to the research plane; it changes nothing else (the 0.9.0 notes below still
+apply, and with research off 1.0.0 still behaves exactly like 0.8.0). Going back from 1.0.0 to 0.9.0 is covered in
+"Level 3b". Release 0.9.0 added the research plane next to the 0.8.0 advisory path. It changes no legacy behaviour (golden
 fixture T06), publishes no new APK and needs no phone update. Rollback therefore means **turning research off**;
 going back to older code is only for the unexpected case and needs the owner's approval. Every step below is tested
 (T10) unless it says otherwise.
@@ -15,7 +17,7 @@ going back to older code is only for the unexpected case and needs the owner's a
 | Android app | unchanged; stays [android-v0.5.0-b9](https://github.com/arnobai70-del/Aysha-Point/releases/tag/android-v0.5.0-b9). `build-android` no longer runs for research-only files |
 | `cli.py` | one new subcommand, `ayesha research …`, imported only when used |
 | New | `desktop/ayesha/research/`, `contracts/research/`, `start-research.bat`, `backup-research.bat`, `research-ci` workflow, docs |
-| Versions | release 0.9.0, desktop 0.9.0, research contracts 1 (`contracts/version.json`) |
+| Versions | release 0.9.0, desktop 0.9.0, research contracts 1 (`contracts/version.json`); 1.0.0: release and desktop 1.0.0, research contracts 2 |
 | Owner data | research files only under `%AYESHA_HOME%\research\`, created only after `ayesha research enable` |
 
 ## Level 1: turn research off (no reinstall, nothing lost)
@@ -58,6 +60,16 @@ Not expected to be needed: with research off, 0.9.0 behaves exactly like 0.8.0. 
 - **On GitHub** (after a merge): revert with a new pull request (`git revert -m 1 <merge commit>`), reviewed like any
   change. 0.8.0 is commit `7e7da2e`.
 
+## Level 3b: go back from 1.0.0 to the 0.9.0 code
+
+1.0.0 adds no registry table and no new artifact kind (comparisons are `exports` files), so the 0.9.0 code (merge
+commit `aad8dbd`) still opens the same `research` folder. Checked by hand on a folder made by 1.0.0 (baseline run, a
+full `research lab` and a comparison): 0.9.0's `research status`, `runs`, `doctor --deep`, `dashboard --check`,
+`backup` and a new baseline run all work. What 0.9.0 cannot show: the `report` of a lab run or the dashboard page of a
+lab run end in an error (`KeyError: 'no_trade_share'`), and comparisons are not listed. Nothing is lost; the same
+folder works again with 1.0.0. Use the same folder-per-version method as Level 3 (`C:\AYESHA-0.9.0`,
+`C:\AYESHA-1.0.0`); on GitHub revert the 1.0.0 merge with a new pull request.
+
 ## Never part of a rollback
 
 - No force-push, no history rewrite on `main`.
@@ -66,7 +78,7 @@ Not expected to be needed: with research off, 0.9.0 behaves exactly like 0.8.0. 
 - No start of `build-android` by hand for research changes (without the owner's signing secrets it would publish an
   APK with a new debug signer, which forces an uninstall).
 
-## Release evidence for 0.9.0
+## Release evidence for 0.9.0 and 1.0.0
 
 | Item | Where |
 |---|---|
@@ -74,4 +86,4 @@ Not expected to be needed: with research off, 0.9.0 behaves exactly like 0.8.0. 
 | Tests | `ci` and `research-ci` on Ubuntu and Windows for the PR head; [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md) |
 | Component versions | `contracts/version.json` |
 | Safety scans | order API, secrets, workflows, Pine check, research isolation (all in CI) |
-| Merge | only after the owner approves the pull request |
+| Merge | only after the owner approves the pull request (0.9.0: `aad8dbd`; 1.0.0: branch `research/v1.0.0`) |

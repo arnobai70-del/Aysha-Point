@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions
 title AYESHA FX research dashboard (research-only, this PC only)
-REM Research plane (0.9.0): a read-only dashboard on 127.0.0.1 for frozen datasets and research runs.
+REM Research plane (0.9.0, Strategy Lab 1.0.0): a read-only dashboard on 127.0.0.1 for frozen datasets and research runs.
 REM Research never sends READY or phone alerts and never places orders. It does not start, stop or change the
 REM scanner (start-ayesha.bat keeps working exactly as before, with or without research).
 REM   start-research.bat           show the research status and open the dashboard in your browser
