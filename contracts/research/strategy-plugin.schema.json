@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arnobai70-del/Aysha-Point/contracts/research/strategy-plugin.schema.json",
+  "title": "Research strategy manifest (research.strategy/1)",
+  "description": "Registration record of a research strategy. Every research strategy is research_only with execution_level NONE; loading checks id/version collisions. v0.9.0 registers only the frozen legacy baseline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "strategy_id",
+    "version",
+    "strategy_hash",
+    "explanation",
+    "timeframes",
+    "symbols",
+    "parameters",
+    "lookback_bars",
+    "stateful",
+    "research_only",
+    "execution_level",
+    "news_source",
+    "cost_source",
+    "kind"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "research.strategy/1"
+    },
+    "strategy_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{3,60}$"
+    },
+    "version": {
+      "type": "string"
+    },
+    "strategy_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$"
+    },
+    "explanation": {
+      "type": "string",
+      "minLength": 10
+    },
+    "timeframes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "enum": [
+          "M5",
+          "M15",
+          "H1",
+          "H4"
+        ]
+      }
+    },
+    "symbols": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z]{6}$"
+      }
+    },
+    "parameters": {
+      "type": "object"
+    },
+    "lookback_bars": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "stateful": {
+      "type": "boolean"
+    },
+    "research_only": {
+      "const": true
+    },
+    "execution_level": {
+      "const": "NONE"
+    },
+    "news_source": {
+      "type": "string"
+    },
+    "cost_source": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "BASELINE",
+        "CONTROL",
+        "EXPERIMENTAL"
+      ]
+    }
+  }
+}

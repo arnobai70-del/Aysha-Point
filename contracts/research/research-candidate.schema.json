@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arnobai70-del/Aysha-Point/contracts/research/research-candidate.schema.json",
+  "title": "Research candidate (research.candidate/1)",
+  "description": "A hypothetical setup found by a research run. It is never an entry: source_type is always RESEARCH, executable is always false, READY is not a valid state, and there is no field the phone alert path reads (no safe_to_alert_for_entry, no signal_id). additionalProperties=false keeps it that way.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "research_candidate_id",
+    "source_type",
+    "executable",
+    "run_id",
+    "strategy_id",
+    "strategy_version",
+    "strategy_hash",
+    "dataset_id",
+    "asof_utc",
+    "pair",
+    "direction",
+    "levels",
+    "proposed_state",
+    "replay_status",
+    "outcome_r",
+    "rejection_codes",
+    "explanation"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "research.candidate/1"
+    },
+    "research_candidate_id": {
+      "type": "string",
+      "pattern": "^rc_[0-9a-f]{16}$"
+    },
+    "source_type": {
+      "const": "RESEARCH"
+    },
+    "executable": {
+      "const": false
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^run_[0-9a-f]{16}$"
+    },
+    "strategy_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{3,60}$"
+    },
+    "strategy_version": {
+      "type": "string"
+    },
+    "strategy_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$"
+    },
+    "dataset_id": {
+      "type": "string",
+      "pattern": "^ds_[0-9a-f]{16}$"
+    },
+    "asof_utc": {
+      "type": "string",
+      "format": "utc-date-time"
+    },
+    "pair": {
+      "type": "string",
+      "pattern": "^[A-Z]{6}$"
+    },
+    "direction": {
+      "enum": [
+        "BUY",
+        "SELL"
+      ]
+    },
+    "levels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry",
+        "stop",
+        "targets"
+      ],
+      "properties": {
+        "entry": {
+          "type": "number"
+        },
+        "stop": {
+          "type": "number"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "proposed_state": {
+      "enum": [
+        "HYPOTHETICAL_CLOSED",
+        "BLOCKED",
+        "NOT_FILLED",
+        "INVALIDATED",
+        "UNRESOLVED"
+      ]
+    },
+    "replay_status": {
+      "type": "string"
+    },
+    "outcome_r": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "rejection_codes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "explanation": {
+      "type": "string"
+    }
+  }
+}

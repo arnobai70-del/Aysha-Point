@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arnobai70-del/Aysha-Point/contracts/research/research-result.schema.json",
+  "title": "Research evaluation run (research.result/1)",
+  "description": "One evaluation run of one strategy on one frozen dataset, with every input pinned by id or hash so it can be repeated. Results are historical simulations in R after modelled costs, not forecasts, and never a trade signal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "source_type",
+    "executable",
+    "commit_sha",
+    "desktop_version",
+    "dataset_id",
+    "dataset_quality",
+    "strategy_id",
+    "strategy_version",
+    "strategy_hash",
+    "parameters_hash",
+    "cost_model_id",
+    "account_scenario_id",
+    "news_snapshot_id",
+    "split_plan_id",
+    "environment_hash",
+    "inputs_hash",
+    "started_at_utc",
+    "completed_at_utc",
+    "metrics",
+    "limitations",
+    "warnings",
+    "candidates_sha256",
+    "result_sha256",
+    "status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "research.result/1"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^run_[0-9a-f]{16}$"
+    },
+    "source_type": {
+      "const": "RESEARCH"
+    },
+    "executable": {
+      "const": false
+    },
+    "commit_sha": {
+      "type": "string"
+    },
+    "desktop_version": {
+      "type": "string"
+    },
+    "dataset_id": {
+      "type": "string",
+      "pattern": "^ds_[0-9a-f]{16}$"
+    },
+    "dataset_quality": {
+      "enum": [
+        "PASS",
+        "DEGRADED"
+      ]
+    },
+    "strategy_id": {
+      "type": "string"
+    },
+    "strategy_version": {
+      "type": "string"
+    },
+    "strategy_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$"
+    },
+    "parameters_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "cost_model_id": {
+      "type": "string"
+    },
+    "account_scenario_id": {
+      "type": "string"
+    },
+    "news_snapshot_id": {
+      "type": "string"
+    },
+    "split_plan_id": {
+      "type": "string"
+    },
+    "environment_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "inputs_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "started_at_utc": {
+      "type": "string",
+      "format": "utc-date-time"
+    },
+    "completed_at_utc": {
+      "type": "string",
+      "format": "utc-date-time"
+    },
+    "metrics": {
+      "type": "object"
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "candidates_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "result_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "status": {
+      "enum": [
+        "COMPLETED"
+      ]
+    }
+  }
+}
