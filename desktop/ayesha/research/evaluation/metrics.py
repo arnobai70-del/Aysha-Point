@@ -176,7 +176,13 @@ def breakdowns(lts: list[LabTrade]) -> dict[str, Any]:
             "session": breakdown(lts, session_key),
             "direction": breakdown(lts, lambda lt: lt.trade.signal.direction),
             "timeframe": breakdown(lts, lambda lt: "M15"),
-            "regime": {"NOT_MODELLED": {"note": "market regimes come with v1.1.0"}}}
+            "regime": breakdown(lts, lambda lt: lt.regime),
+            "news_phase": breakdown(lts, lambda lt: lt.trade.news_phase)}
+
+
+def regime_matrix(lts: list[LabTrade], labels) -> dict[str, Any]:
+    """One cell per regime label (empty ones included), each marked INSUFFICIENT_SAMPLE below `CELL_MIN`."""
+    return {k: compact(summary([lt for lt in lts if lt.regime == k])) for k in labels}
 
 
 def without_best(lts: list[LabTrade], share: float = 0.05) -> dict[str, Any]:

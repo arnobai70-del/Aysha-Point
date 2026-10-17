@@ -44,7 +44,9 @@ def run_markdown(ws: Workspace, run_id: str) -> str:
         ("Data licence", m.get("license_notes", "?")),
         ("Costs", res["cost_model_id"]),
         ("Account scenario", res["account_scenario_id"]),
-        ("News", res["news_snapshot_id"]),
+        ("News", res["news_snapshot_id"] + (f" ({res['metrics']['news']['mode']} handling)"
+                                             if (res["metrics"].get("news") or {}).get("mode", "none") != "none"
+                                             else "")),
         ("Split", res["split_plan_id"]),
         ("Code", f"commit {res['commit_sha'][:12]}, desktop {res['desktop_version']}"),
         ("Hashes", f"inputs {res['inputs_hash'][:16]}, result {res['result_sha256'][:16]}, candidates "
@@ -120,7 +122,21 @@ def _lab_sections(res: dict[str, Any]) -> list[str]:
         rows = [[f"{group}={k}", *[v.get(c) for c in CELLS]] for k, v in cells.items() if "closed_trades" in v]
         if rows:
             out += _table(["Cell", *CELLS], rows) + [""]
-    out += ["Regime: not modelled yet (v1.1.0)."]
+    reg = mt.get("regime")
+    if reg:
+        det = reg["detector"]
+        out += ["## Strategy x regime (label known when each order was decided)", "",
+                f"Detector {det['detector_id']} {det['version']} (code {det['code_sha256'][:12]}): {reg['note']}.", ""]
+        out += _table(["Regime", *CELLS, "Sample"], [[k, *[v.get(c) for c in CELLS], v["sample"]]
+                                                     for k, v in reg["matrix"].items()])
+    else:
+        out += ["Regime: not recorded by this program version."]
+    nc = mt.get("news_comparison")
+    if nc:
+        out += ["", f"## News comparison: {nc['status']}", "", nc["note"], ""]
+        if nc.get("modes"):
+            out += _table(["News handling", *CELLS, "Sample"], [[k, *[v.get(c) for c in CELLS], v["sample"]]
+                                                                for k, v in nc["modes"].items()])
     rob = mt.get("robustness")
     if rob:
         out += ["", "## Robustness", "", "Cost sensitivity (one change at a time):", ""]
@@ -168,6 +184,27 @@ def comparison_markdown(doc: dict[str, Any]) -> str:
     lines += ["", "## Side by side (after costs, in R)", ""]
     lines += _table(["Metric", *[r["strategy_id"] for r in doc["rows"]]],
                     [[c, *[r.get(c) for r in doc["rows"]]] for c in cols])
+    reg_rows = [r for r in doc["rows"] if r.get("regimes")]
+    if reg_rows:
+        labels = list(reg_rows[0]["regimes"])
+        lines += ["", f"## Strategy x regime (expectancy R / closed trades; detector {doc.get('regime_detector')})", ""]
+        lines += _table(["Regime", *[r["strategy_id"] for r in reg_rows]],
+                        [[k, *[(f"{_v(r['regimes'][k]['expectancy_r'])} / {r['regimes'][k]['closed_trades']}" +
+                                (" (INSUFFICIENT_SAMPLE)" if r["regimes"][k]["sample"] != "OK" else ""))
+                               for r in reg_rows]] for k in labels])
+    news_rows = [r for r in doc["rows"] if r.get("news_comparison")]
+    if news_rows:
+        st = news_rows[0]["news_comparison"]["status"]
+        lines += ["", f"## News comparison: {st} (snapshot {doc.get('news_snapshot_id')}, mode "
+                      f"{doc.get('news_mode', 'none')})", ""]
+        if st == "COMPARED":
+            lines += _table(["News handling", *[r["strategy_id"] for r in news_rows]],
+                            [[m, *[f"{_v(r['news_comparison'][m]['expectancy_r'])} / "
+                                   f"{r['news_comparison'][m]['closed_trades']} closed, blocked "
+                                   f"{_v(r['news_comparison'][m]['no_trade_share'])}" for r in news_rows]]
+                             for m in ("none", "legacy", "upgraded")])
+        else:
+            lines += ["No historical news snapshot was used: news is not modelled (BLOCKED_BY_DATA)."]
     lines += ["", "## Hypothetical accounts", ""]
     for r in doc["rows"]:
         lines += [f"{r['strategy_id']}: " + "; ".join(

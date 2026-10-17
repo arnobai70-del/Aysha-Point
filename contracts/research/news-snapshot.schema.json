@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arnobai70-del/Aysha-Point/contracts/research/news-snapshot.schema.json",
+  "title": "Frozen historical news calendar (research.news-snapshot/1)",
+  "description": "A calendar file the owner may use, frozen with provenance and an integrity report. Replays see it only point in time (rows after observed_utc, actuals after actual_published_utc). News direction is never backtested. Research only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "news_snapshot_id",
+    "source_type",
+    "provider",
+    "label",
+    "license_notes",
+    "file_name",
+    "raw_sha256",
+    "imported_at_utc",
+    "parser",
+    "point_in_time_view",
+    "integrity",
+    "code"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "research.news-snapshot/1"
+    },
+    "news_snapshot_id": {
+      "type": "string",
+      "pattern": "^ns_[0-9a-f]{16}$"
+    },
+    "source_type": {
+      "const": "RESEARCH"
+    },
+    "provider": {
+      "type": "string",
+      "minLength": 1
+    },
+    "label": {
+      "type": "string"
+    },
+    "license_notes": {
+      "type": "string",
+      "minLength": 10
+    },
+    "file_name": {
+      "type": "string"
+    },
+    "raw_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "imported_at_utc": {
+      "type": "string",
+      "format": "utc-date-time"
+    },
+    "parser": {
+      "type": "string"
+    },
+    "point_in_time_view": {
+      "type": "string"
+    },
+    "integrity": {
+      "type": "object",
+      "required": [
+        "decision",
+        "rows",
+        "issues",
+        "news_direction"
+      ],
+      "properties": {
+        "decision": {
+          "enum": [
+            "PASS",
+            "DEGRADED",
+            "REJECTED"
+          ]
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "news_direction": {
+          "const": "NEWS DIRECTION NOT BACKTESTED"
+        }
+      }
+    },
+    "code": {
+      "type": "object",
+      "required": [
+        "commit",
+        "desktop_version"
+      ],
+      "properties": {
+        "commit": {
+          "type": "string"
+        },
+        "desktop_version": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

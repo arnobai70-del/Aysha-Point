@@ -1,4 +1,4 @@
-# Research (গবেষণা) অংশ: মালিকের নির্দেশিকা (রিলিজ 1.0.0)
+# Research (গবেষণা) অংশ: মালিকের নির্দেশিকা (রিলিজ 1.1.0)
 
 মূল কথা:
 - Research অংশ **ডিফল্টভাবে বন্ধ**। চালু না করলে কিছুই বদলায় না; scanner, ফোন অ্যালার্ট, capital, নিউজ সব 0.8.0-এর মতোই চলে।
@@ -135,9 +135,46 @@ spread +25%/+50%, slippage, এক bar দেরিতে ঢুকলে কী
 - **`NOT_DISTINGUISHABLE`**: পার্থক্য পরিসংখ্যানে আলাদা করা যায় না; "ভালো" ধরবেন না।
 - **Benchmark parity `MATCHED`**: Lab-এর runner A-কে পুরনো replay-এর মতো হুবহু চালিয়েছে। `DIFFERENT` এলে ফলে ভরসা করবেন না,
   আমাকে জানাবেন (`lab` তখন exit 1 দেয়)।
-- নিউজ এখানে **ধরা হয়নি** (ঐতিহাসিক calendar নেই); লাইভে নিউজ gate কিছু ট্রেড আটকাত।
+- `--news` ছাড়া নিউজ **ধরা হয় না**; লাইভে নিউজ gate কিছু ট্রেড আটকাত। নিউজসহ চালাতে নিচের ঙ-৩ দেখুন।
 
 একটা নিয়ম ভালো দেখালেও সেটা **যাচাই করা edge নয়**, আর কিছুই নিজে থেকে লাইভ হয় না।
+
+## ঙ-৩. Market regime, ঐতিহাসিক নিউজ আর feed audit (1.1.0)
+
+**Market regime (বাজারের অবস্থা):** প্রতিটি বন্ধ H4 bar থেকে বাজারকে ছয় ভাগের একটা বলা হয়: `TREND_UP`, `TREND_DOWN`,
+`RANGE`, `HIGH_VOL` (অস্বাভাবিক বেশি ওঠানামা), `TRANSITION` (অনিশ্চিত), `UNKNOWN` (শুরুর ~২০ দিন বা ডেটায় ফাঁক থাকলে)।
+Label শুধু অতীত দেখে, H4 bar বন্ধ হওয়ার পরে জানা যায়, পরে কখনো বদলায় না। এটা **শুধু প্রেক্ষাপট**: কোনো ট্রেডের অনুমতি
+বা বাধা নয়।
+```
+python -m ayesha.cli research regime --dataset ds_... --symbol EURUSD
+```
+`lab.md`-এ এখন **strategy × regime** টেবিল আছে: প্রতিটি নিয়ম কোন regime-এ কেমন করেছে (ট্রেডের সিদ্ধান্তের সময় যে label জানা ছিল)।
+কোনো ঘরে ৩০-এর কম বন্ধ ট্রেড থাকলে `INSUFFICIENT_SAMPLE`: ওই ঘর থেকে কিছু ধরবেন না।
+
+**ঐতিহাসিক নিউজ:** শুধু এমন calendar ফাইল দেবেন যা ব্যবহারের অনুমতি আপনার আছে (website scrape করা ফাইল নয়)। ফাইলের কলাম:
+`time_utc,currency,impact,title` আর পারলে `observed_utc` (ঘটনাটা কখন calendar-এ দেখা গিয়েছিল), `actual`,
+`actual_published_utc` (ফল কখন প্রকাশ হয়েছিল)।
+```
+python -m ayesha.cli research news-ingest --csv calendar.csv --provider "উৎসের নাম" --license "কোন অনুমতিতে ব্যবহার করছি"
+python -m ayesha.cli research news
+python -m ayesha.cli research lab --dataset ds_... --symbols EURUSD,GBPUSD --news ns_... --holdout 2026-01-01
+```
+- `--license` ছাড়া ফাইল নেওয়া হয় না। ফাইল হুবহু জমা থাকে (`ns_...`), বদলানো যায় না।
+- `PASS`: ঠিক আছে। `DEGRADED`: `observed_utc` নেই, তাই সময়সূচি ফাইলের শেষ রূপ (তখন যা জানা ছিল তা নয়); ফলে লেখা থাকে।
+  `REJECTED`: পড়া যায় না বা অজানা currency/impact; ব্যবহার করা যায় না।
+- `actual` শুধু তার প্রকাশের সময়ের পরে দেখানো হয়; প্রকাশের সময় না থাকলে কখনো দেখানো হয় না।
+- `--news-mode upgraded` (ডিফল্ট) লাইভের নতুন নিউজ gate, `legacy` পুরনো ±৩০ মিনিটের নিয়ম। `lab.md`-এ প্রতিটি নিয়ম তিনভাবে দেখায়:
+  নিউজ ছাড়া, legacy আর upgraded। নিউজের **দিক (actual বনাম forecast) কখনো backtest হয় না**।
+- Snapshot না দিলে নিউজ তুলনা `BLOCKED_BY_DATA`।
+
+**Feed audit (দুই উৎসের দাম মেলানো):** একই পেয়ারের দুটি dataset (যেমন OANDA আর আপনার Exness chart থেকে export) bar ধরে মেলায়:
+কত bar মেলে, কোন দিকে bar নেই, close/spread কত pip আলাদা।
+```
+python -m ayesha.cli research feed-audit --a ds_OANDA... --b ds_EXNESS... --symbol EURUSD
+python -m ayesha.cli research feed-audits
+```
+`MATCHED` (close-এর পার্থক্য ৯৫% bar-এ ১ pip-এর মধ্যে, সর্বোচ্চ ৫ pip, ২%-এর কম bar নেই), `DIFFERENT`, বা ৫০০-এর কম মিল থাকলে
+`INSUFFICIENT_OVERLAP`। কোনো feed-ই "আসল" নয়; Exness-এর সাথে মিল তখনই বলা যায় যখন একদিকে সত্যিই Exness-এর export থাকে।
 
 ## চ. Dashboard (শুধু এই PC-তে)
 
@@ -181,7 +218,7 @@ Scanner কখনো research-এর উপর নির্ভর করে ন�
 
 ## ঞ. আমাকে কী পাঠাবেন
 
-- `research report cmp_... --md lab.md`-এর `lab.md` (Strategy Lab), বা `research report run_... --md report.md`-এর `report.md`
+- `research report cmp_... --md lab.md`-এর `lab.md` (Strategy Lab, নিউজ বা regime সহ), `research feed-audits`-এর আউটপুট, বা `research report run_... --md report.md`-এর `report.md`
   (আর চাইলে `research parity`-র আউটপুট)।
 - সমস্যা হলে `research doctor`-এর আউটপুট।
 - **পাঠাবেন না:** দামের ডেটা, `research.db`, টোকেন, pairing code, Exness-এর কোনো তথ্য।

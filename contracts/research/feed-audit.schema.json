@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/arnobai70-del/Aysha-Point/contracts/research/feed-audit.schema.json",
+  "title": "Data-feed comparison (research.feed-audit/1)",
+  "description": "Bar-by-bar comparison of the same pair and timeframe in two frozen datasets (for example OANDA practice vs an export from the owner's broker chart). Measures how far the feeds differ; it never makes one of them the broker's truth. Research only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "feed_audit_id",
+    "source_type",
+    "symbol",
+    "timeframe",
+    "dataset_a",
+    "dataset_b",
+    "status",
+    "overlap",
+    "differences",
+    "thresholds",
+    "notes",
+    "created_at_utc"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "research.feed-audit/1"
+    },
+    "feed_audit_id": {
+      "type": "string",
+      "pattern": "^fa_[0-9a-f]{16}$"
+    },
+    "source_type": {
+      "const": "RESEARCH"
+    },
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Z]{6}$"
+    },
+    "timeframe": {
+      "enum": [
+        "M5",
+        "M15"
+      ]
+    },
+    "dataset_a": {
+      "type": "object"
+    },
+    "dataset_b": {
+      "type": "object"
+    },
+    "status": {
+      "enum": [
+        "MATCHED",
+        "DIFFERENT",
+        "INSUFFICIENT_OVERLAP"
+      ]
+    },
+    "overlap": {
+      "type": "object"
+    },
+    "differences": {
+      "type": "object"
+    },
+    "thresholds": {
+      "type": "object"
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "created_at_utc": {
+      "type": "string",
+      "format": "utc-date-time"
+    },
+    "feed_audit_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

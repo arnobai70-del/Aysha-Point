@@ -60,6 +60,27 @@
     "account_scenario_id": {
       "type": "string"
     },
+    "news_snapshot_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ns_... snapshot, or NONE:NEWS_NOT_MODELLED (v1.1.0)"
+    },
+    "news_mode": {
+      "enum": [
+        "none",
+        "legacy",
+        "upgraded"
+      ]
+    },
+    "regime_detector": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "detector id@version#code hash (v1.1.0)"
+    },
     "runs": {
       "type": "array",
       "minItems": 2,

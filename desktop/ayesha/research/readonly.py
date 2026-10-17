@@ -102,6 +102,10 @@ class ReadOnlyRegistry:
     def partitions(self, dataset_id: str) -> list[sqlite3.Row]:
         return self._all("SELECT * FROM dataset_partitions WHERE dataset_id=? ORDER BY symbol, timeframe", dataset_id)
 
+    def partition(self, dataset_id: str, symbol: str, timeframe: str) -> sqlite3.Row | None:
+        return self._one("SELECT * FROM dataset_partitions WHERE dataset_id=? AND symbol=? AND timeframe=?",
+                         dataset_id, symbol, timeframe)
+
     def run(self, run_id: str) -> sqlite3.Row | None:
         return self._one("SELECT * FROM research_runs WHERE run_id=?", run_id)
 

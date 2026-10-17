@@ -279,7 +279,8 @@ def cmd_strategies(a) -> int:
 def _lab_args(a) -> dict[str, Any]:
     return {"dataset_id": a.dataset, "symbols": a.symbols or a.symbol, "split": a.split or None, "folds": a.folds,
             "holdout": a.holdout or None, "reveal_holdout": a.reveal_holdout, "account_type": a.account_type,
-            "allow_degraded": a.allow_degraded, "quick": a.quick, "spec": a.spec}
+            "allow_degraded": a.allow_degraded, "quick": a.quick, "spec": a.spec, "news": a.news or None,
+            "news_mode": a.news_mode}
 
 
 def _print_lab_run(r: dict[str, Any]) -> None:
@@ -291,10 +292,133 @@ def _print_lab_run(r: dict[str, Any]) -> None:
               f"{', '.join(r['limitations'])}")
 
 
+def _ro_ws():
+    from ayesha.research.readonly import ReadOnlyWorkspace
+
+    if not (research_home() / "research.db").exists():
+        return None
+    return ReadOnlyWorkspace(research_home())
+
+
+def cmd_news_ingest(a) -> int:
+    rc, r = _job("news_ingest", {"file": str(Path(a.csv).expanduser().resolve()), "provider": a.provider,
+                                 "license": a.license, "label": a.label or ""})
+    if r is None:
+        return rc
+    print(f"News snapshot {r['news_snapshot_id']}: {r['decision']}, {r['rows']} rows" +
+          ("" if r["new"] else " (already frozen: same file)"))
+    for i in r.get("issues", []):
+        print(f"  {i}")
+    if r["decision"] == "REJECTED":
+        print("REJECTED snapshots cannot be used. Fix the file and import it again.")
+        return EXIT_REFUSED
+    print(f"Use it with: ayesha research lab --dataset DS --symbols ... --news {r['news_snapshot_id']}")
+    print("News direction (actual vs forecast) is never backtested.")
+    return EXIT_OK
+
+
+def cmd_news(a) -> int:
+    from ayesha.research.datasets.news_snapshot import snapshots
+
+    ws = _ro_ws()
+    if ws is None:
+        print("No research data yet.")
+        return EXIT_OK
+    try:
+        docs = snapshots(ws)
+    finally:
+        ws.close()
+    rows = [{"news_snapshot_id": d["news_snapshot_id"], "decision": d["integrity"]["decision"],
+             "rows": d["integrity"]["rows"], "coverage_utc": d["integrity"]["coverage_utc"],
+             "provider": d["provider"], "license_notes": d["license_notes"], "label": d["label"],
+             "issues": [f"{i['severity']} {i['code']} x{i['count']}" for i in d["integrity"]["issues"]],
+             "imported_at_utc": d["imported_at_utc"]} for d in docs]
+    if a.json:
+        _p(rows)
+        return EXIT_OK
+    if not rows:
+        print('No news snapshots. Import a calendar you may use: ayesha research news-ingest --csv FILE '
+              '--provider NAME --license "..."')
+    for r in rows:
+        cov = " .. ".join(r["coverage_utc"]) if r["coverage_utc"] else "-"
+        print(f"{r['news_snapshot_id']}  {r['decision']:<8}  {r['rows']} rows  {cov}  {r['provider']}  ({r['label']})")
+        for i in r["issues"]:
+            print(f"    {i}")
+    return EXIT_OK
+
+
+def cmd_regime(a) -> int:
+    from ayesha.research.regimes.detector import timeline
+    from ayesha.research.simulation.baseline import RunRefused, load_candles
+
+    ws = _ro_ws()
+    if ws is None:
+        print("No research data yet.")
+        return EXIT_REFUSED
+    try:
+        if ws.db.dataset(a.dataset) is None:
+            print(f"Unknown dataset {a.dataset}")
+            return EXIT_REFUSED
+        try:
+            cs = load_candles(ws, a.dataset, a.symbol.upper(), "M15")
+        except RunRefused as e:
+            print(e)
+            return EXIT_REFUSED
+    finally:
+        ws.close()
+    tl = timeline(a.symbol.upper(), cs)
+    if a.json:
+        _p(tl)
+        return EXIT_OK
+    det = tl["detector"]
+    print(f"Regimes of {tl['symbol']} in {a.dataset}: detector {det['detector_id']} {det['version']}, "
+          f"{tl['h4_bars']} closed H4 bars, first label {tl['first_known_at'] or '-'}, {tl['switches']} switches")
+    for k, v in tl["share"].items():
+        print(f"  {k:<11} {tl['counts'][k]:>6}  {v if v is not None else '-'}")
+    print("Labels are known only at the close of their H4 bar. Context only: never a gate, never a reason to trade.")
+    return EXIT_OK
+
+
+def cmd_feed_audit(a) -> int:
+    rc, r = _job("feed_audit", {"dataset_a": a.a, "dataset_b": a.b, "symbol": a.symbol.upper(),
+                                "timeframe": a.tf})
+    if r is None:
+        return rc
+    p95 = r["close_p95_pips"]
+    print(f"Feed audit {r['feed_audit_id']}: {r['status']} ({r['common_bars']} common bars, close difference p95 "
+          f"{p95 if p95 is not None else '-'} pips)")
+    print("Neither feed is the broker's truth; Exness parity stays UNVERIFIED unless one side is an Exness export.")
+    return EXIT_OK
+
+
+def cmd_feed_audits(a) -> int:
+    from ayesha.research.datasets.feed_audit import audits
+
+    ws = _ro_ws()
+    if ws is None:
+        print("No research data yet.")
+        return EXIT_OK
+    try:
+        docs = audits(ws)
+    finally:
+        ws.close()
+    if a.json:
+        _p(docs)
+        return EXIT_OK
+    if not docs:
+        print("No feed audits. Compare two datasets with: ayesha research feed-audit --a DS1 --b DS2 --symbol EURUSD")
+    for d in docs:
+        c = d["differences"]["close"]
+        print(f"{d['feed_audit_id']}  {d['status']:<20}  {d['symbol']} {d['timeframe']}  {d['dataset_a']['dataset_id']}"
+              f" vs {d['dataset_b']['dataset_id']}  common {d['overlap']['common_bars']}  close p95 "
+              f"{c['p95'] if c['p95'] is not None else '-'} pips")
+    return EXIT_OK
+
+
 def cmd_run(a) -> int:
     from ayesha.research.strategies.loader import LAB_ORDER
 
-    legacy = a.strategy == LAB_ORDER[0] and not a.symbols and not a.holdout and not a.quick
+    legacy = a.strategy == LAB_ORDER[0] and not a.symbols and not a.holdout and not a.quick and not a.news
     if legacy:
         if not a.symbol:
             print("Give --symbol (one pair) or --symbols (comma list)")
@@ -587,6 +711,10 @@ def build_parser(prog: str = "ayesha research") -> argparse.ArgumentParser:
         s.add_argument("--account-type", default="Standard", choices=["Standard", "StandardCent"])
         s.add_argument("--allow-degraded", action="store_true", help="use a DEGRADED dataset (marked in the result)")
         s.add_argument("--quick", action="store_true", help="skip the robustness re-runs (costs, parameters)")
+        s.add_argument("--news", help="a frozen news snapshot (ns_..., see: ayesha research news); default: news "
+                                      "not modelled")
+        s.add_argument("--news-mode", default="upgraded", choices=["legacy", "upgraded"],
+                       help="with --news: legacy fixed window or the live upgraded guard (default)")
 
     s = sub.add_parser("run", help="run one research strategy on a frozen dataset")
     s.add_argument("strategy", help="see: ayesha research strategies")
@@ -605,6 +733,30 @@ def build_parser(prog: str = "ayesha research") -> argparse.ArgumentParser:
     s = sub.add_parser("comparisons", help="list Strategy Lab comparisons")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_comparisons)
+
+    s = sub.add_parser("news-ingest", help="freeze a historical news calendar CSV you are allowed to use")
+    s.add_argument("--csv", required=True, help="calendar CSV (time_utc,currency,impact,title[,observed_utc,...])")
+    s.add_argument("--provider", required=True, help="who produced the calendar")
+    s.add_argument("--license", required=True, help="licence or permission under which you may use it")
+    s.add_argument("--label", default="")
+    s.set_defaults(fn=cmd_news_ingest)
+    s = sub.add_parser("news", help="list frozen news snapshots and their integrity reports")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_news)
+    s = sub.add_parser("regime", help="as-of market regime labels of a dataset (read-only)")
+    s.add_argument("--dataset", required=True)
+    s.add_argument("--symbol", required=True)
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_regime)
+    s = sub.add_parser("feed-audit", help="compare the same pair in two datasets bar by bar")
+    s.add_argument("--a", required=True, help="first dataset (ds_...)")
+    s.add_argument("--b", required=True, help="second dataset (ds_...)")
+    s.add_argument("--symbol", required=True)
+    s.add_argument("--tf", default="M15", choices=["M5", "M15"])
+    s.set_defaults(fn=cmd_feed_audit)
+    s = sub.add_parser("feed-audits", help="list feed audits")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_feed_audits)
 
     s = sub.add_parser("runs", help="list research runs")
     s.add_argument("--limit", type=int, default=50)

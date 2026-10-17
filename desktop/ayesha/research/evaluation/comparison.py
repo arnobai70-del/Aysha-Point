@@ -2,8 +2,8 @@
 
 A comparison is only made between runs that share every input that could change the numbers apart from the
 strategy itself: dataset, symbols, split plan (and whether the holdout was revealed), base and sensitivity cost
-models, account scenario and news snapshot. Anything else is refused, so a "better" strategy can never come from a
-friendlier cost model or a different period.
+models, account scenario, news snapshot and news mode, regime detector. Anything else is refused, so a "better"
+strategy can never come from a friendlier cost model or a different period.
 
 The comparison never promotes anything. Ranking is `NO_RANKING` unless every strategy has at least `MIN_SAMPLE`
 closed trades, and even then it is only the order of after-cost expectancy on the data shown, labelled
@@ -12,6 +12,10 @@ closed trades, and even then it is only the order of after-cost expectancy on th
 audit event; the comparison id is the hash of its content without the creation time. It uses the existing `exports`
 artifact kind (file suffix `.comparison.json`) and no new registry table, so a rollback to 0.9.0 still reads and
 verifies the whole research folder.
+
+v1.1.0: each row carries the strategy's regime matrix (every label, `INSUFFICIENT_SAMPLE` below the cell minimum)
+and, when a news snapshot was used, its results with news off / legacy window / upgraded guard; without a snapshot
+the news comparison is `BLOCKED_BY_DATA`.
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ from ayesha.research.simulation.baseline import RunRefused
 from ayesha.research.strategies import loader
 
 SAME = ("dataset_id", "symbols", "split_plan_id", "reveal_holdout", "cost_model_id", "sensitivity_models",
-        "account_scenario_id", "news_snapshot_id")
+        "account_scenario_id", "news_snapshot_id", "news_mode", "regime_detector")
 ROW_SCENARIOS = (20.0, 100.0, 1000.0)
 KIND, EXT = "exports", ".comparison.json"
 
@@ -49,6 +53,15 @@ def _row(res: dict[str, Any]) -> dict[str, Any]:
         row["cost_sensitivity_expectancy_r"] = costs
         row["worst_cost_case_expectancy_r"] = min(vals) if vals else None
         row["without_best_5_percent_expectancy_r"] = rob["without_best_5_percent"]["expectancy_r"]
+    reg = (m.get("regime") or {}).get("matrix")
+    row["regimes"] = ({k: {"closed_trades": v["closed_trades"], "expectancy_r": v["expectancy_r"],
+                           "sample": v["sample"]} for k, v in reg.items()} if reg else None)
+    nc = m.get("news_comparison") or {"status": "NOT_RECORDED"}
+    row["news_comparison"] = ({"status": nc["status"], **{k: {"closed_trades": v["closed_trades"],
+                                                              "expectancy_r": v["expectancy_r"],
+                                                              "no_trade_share": v["no_trade_share"],
+                                                              "sample": v["sample"]}
+                                                          for k, v in nc.get("modes", {}).items()}})
     row["accounts"] = [{"equity_usd": a["equity_start_usd"], "taken": a["taken"], "end_usd": a["equity_end_usd"],
                         "return_percent": a["return_percent"], "max_drawdown_percent": a["max_drawdown_percent"],
                         "first_blockers": a["skipped"]}
@@ -108,6 +121,12 @@ def compare(ws, run_ids: list[str]) -> dict[str, Any]:
                 "Differences assume independent trades, so their intervals are optimistic."]
     if len({r["commit_sha"] for r in results}) > 1:
         warnings.append("The runs were made by different program versions (commit differs).")
+    if first.get("news_mode", "none") == "none":
+        warnings.append("News was not modelled (no historical news snapshot): the news comparison is BLOCKED_BY_DATA.")
+    else:
+        warnings.append("News direction (actual vs forecast) is not backtested.")
+    warnings.append("Regime labels are context known at decision time, not a reason to trade; cells under "
+                    f"{M.CELL_MIN} closed trades are INSUFFICIENT_SAMPLE.")
     if parity.get("status") == "DIFFERENT":
         warnings.append("The baseline through the common runner differs from the legacy replay: do not trust this "
                         "comparison until that is explained.")
@@ -115,6 +134,8 @@ def compare(ws, run_ids: list[str]) -> dict[str, Any]:
         "schema_version": "research.comparison/1", "source_type": "RESEARCH", "executable": False,
         "dataset_id": first["dataset_id"], "symbols": first["symbols"], "split_plan_id": first["split_plan_id"],
         "cost_model_id": first["cost_model_id"], "account_scenario_id": first["account_scenario_id"],
+        "news_snapshot_id": first.get("news_snapshot_id"), "news_mode": first.get("news_mode", "none"),
+        "regime_detector": first.get("regime_detector"),
         "runs": [{"run_id": r["run_id"], "strategy_id": r["strategy_id"], "strategy_version": r["strategy_version"],
                   "strategy_hash": r["strategy_hash"], "kind": r["inputs_kind"], "result_sha256": r["result_sha256"]}
                  for r in results],
@@ -135,10 +156,12 @@ def compare(ws, run_ids: list[str]) -> dict[str, Any]:
 
 def run_lab(ws, spec: dict[str, Any], dataset_id: str, symbols, folds: int = 4, split: str | None = None,
             holdout: str | None = None, reveal_holdout: bool = False, account_type: str = "Standard",
-            allow_degraded: bool = False, robustness: bool = True) -> dict[str, Any]:
+            allow_degraded: bool = False, robustness: bool = True, news_snapshot_id: str | None = None,
+            news_mode: str = "upgraded") -> dict[str, Any]:
     """Every registered strategy (baseline, control, experimental) on the same inputs, then their comparison."""
     runs = [lab.run_strategy(ws, spec, sid, dataset_id, symbols, folds, split, holdout, reveal_holdout,
-                             account_type, allow_degraded, robustness) for sid in loader.LAB_ORDER]
+                             account_type, allow_degraded, robustness, news_snapshot_id=news_snapshot_id,
+                             news_mode=news_mode) for sid in loader.LAB_ORDER]
     doc = compare(ws, [r["run_id"] for r in runs])
     return {"comparison_id": doc["comparison_id"], "runs": runs, "ranking": doc["ranking"]["state"],
             "benchmark_parity": doc["benchmark_parity"].get("status")}
