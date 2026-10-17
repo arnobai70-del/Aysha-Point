@@ -11,4 +11,4 @@ scanner, risk engine, news guard and capital code do not import this package; `s
 fails CI if they ever do. Results are historical simulations, not forecasts.
 """
 
-RESEARCH_VERSION = "1.0.0"
+RESEARCH_VERSION = "1.1.0"

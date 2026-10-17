@@ -60,6 +60,24 @@ def main() -> int:
                   ("benchmark parity MATCHED", "ranking NO_RANKING"), env)
         cid = re.search(r"Comparison (cmp_[0-9a-f]{16})", out).group(1) if "Comparison cmp_" in out else "cmp_missing"
         run(["report", cid], 0, ("RESEARCH ONLY", "Side by side"), env)
+        cal = Path(d) / "calendar.csv"
+        rows = ["time_utc,currency,impact,title,observed_utc"]
+        for day in range(3, 32):
+            for hh, ccy in ((8, "EUR"), (12, "USD"), (14, "USD")):
+                rows.append(f"2025-03-{day:02d}T{hh:02d}:30:00Z,{ccy},HIGH,Synthetic {hh},2025-03-01T00:00:00Z")
+        cal.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        run(["news-ingest", "--csv", str(cal), "--provider", "SYNTHETIC", "--license", "x"], 2, ("licence",), env)
+        out = run(["news-ingest", "--csv", str(cal), "--provider", "SYNTHETIC", "--license",
+                   "synthetic calendar written by the smoke test"], 0, ("PASS", "never backtested"), env)
+        ns = re.search(r"(ns_[0-9a-f]{16})", out).group(1) if "ns_" in out else "ns_missing"
+        run(["news"], 0, (ns,), env)
+        run(["regime", "--dataset", ds, "--symbol", "EURUSD"], 0, ("regime-h4-er-slope-vol", "never a gate"), env)
+        out = run(["lab", "--dataset", ds, "--symbols", "EURUSD", "--quick", "--news", ns], 0,
+                  ("benchmark parity MATCHED",), env)
+        ncid = re.search(r"Comparison (cmp_[0-9a-f]{16})", out).group(1) if "Comparison cmp_" in out else "cmp_missing"
+        run(["report", ncid], 0, ("Strategy x regime", "News comparison: COMPARED"), env)
+        run(["feed-audit", "--a", ds, "--b", ds, "--symbol", "EURUSD"], 2, ("two different datasets",), env)
+        run(["feed-audits"], 0, ("No feed audits",), env)
         out = run(["run", "control-london-orb", "--dataset", ds, "--symbol", "EURUSD", "--quick"], 0,
                   ("COMPLETED",), env)
         run(["run", "control-london-orb", "--dataset", ds, "--symbol", "EURUSD", "--quick", "--verify"], 0,

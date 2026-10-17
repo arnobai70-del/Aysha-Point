@@ -198,11 +198,34 @@ class App:
                     for j in jobs], raw_cols=(0,)))
 
     def data(self, ws) -> str:
+        from ayesha.research.datasets.feed_audit import audits
+        from ayesha.research.datasets.news_snapshot import snapshots
+
         if ws.db is None:
             return "<p>No research data yet.</p>"
-        return table(["Dataset", "Quality", "Provider", "Symbols", "Timeframes", "From", "To", "Label"], [
+        out = [table(["Dataset", "Quality", "Provider", "Symbols", "Timeframes", "From", "To", "Label"], [
             [link(f"/data/{d['dataset_id']}", d["dataset_id"]), d["quality_state"], d["provider"], d["symbols"],
-             d["timeframes"], d["start_utc"], d["end_utc"], d["label"]] for d in ws.db.datasets()], raw_cols=(0,))
+             d["timeframes"], d["start_utc"], d["end_utc"], d["label"]] for d in ws.db.datasets()], raw_cols=(0,))]
+        ns = snapshots(ws)
+        out.append("<h2 lang='bn'>ঐতিহাসিক নিউজ · News snapshots</h2>" + table(
+            ["Snapshot", "Integrity", "Rows", "Coverage", "Provider", "Licence", "Issues"],
+            [[n["news_snapshot_id"], n["integrity"]["decision"], n["integrity"]["rows"],
+              " .. ".join(n["integrity"]["coverage_utc"] or []), n["provider"], n["license_notes"],
+              ", ".join(f"{i['severity']} {i['code']} x{i['count']}" for i in n["integrity"]["issues"])]
+             for n in ns]))
+        if not ns:
+            out.append("<p class='muted'>No news snapshot: news comparisons are BLOCKED_BY_DATA. Import a calendar "
+                       "you may use with <code>ayesha research news-ingest</code>.</p>")
+        fa = audits(ws)
+        out.append("<h2>Feed audits</h2>" + table(
+            ["Audit", "Status", "Pair", "A", "B", "Common bars", "Close diff p95 (pips)", "Max (pips)"],
+            [[a["feed_audit_id"], a["status"], f"{a['symbol']} {a['timeframe']}",
+              f"{a['dataset_a']['dataset_id']} ({a['dataset_a']['provider']})",
+              f"{a['dataset_b']['dataset_id']} ({a['dataset_b']['provider']})", a["overlap"]["common_bars"],
+              a["differences"]["close"]["p95"], a["differences"]["close"]["max"]] for a in fa]))
+        out.append("<p class='muted'>A feed audit measures how far two feeds differ; Exness parity stays UNVERIFIED "
+                   "unless one side is an Exness export.</p>")
+        return "".join(out)
 
     def dataset(self, ws, dataset_id: str) -> str:
         if ws.db is None or ws.db.dataset(dataset_id) is None:
@@ -359,6 +382,22 @@ class App:
                 "worst_cost_case_expectancy_r", "without_best_5_percent_expectancy_r", "sample")
         out.append("<h2>Side by side (R after modelled costs)</h2>" + table(
             ["Metric", *[r["strategy_id"] for r in d["rows"]]], [[c, *[r.get(c) for r in d["rows"]]] for c in cols]))
+        reg_rows = [r for r in d["rows"] if r.get("regimes")]
+        if reg_rows:
+            out.append("<h2 lang='bn'>Strategy × regime (সিদ্ধান্তের সময় জানা label)</h2>" + table(
+                ["Regime", *[r["strategy_id"] for r in reg_rows]],
+                [[k, *[f"{r['regimes'][k]['expectancy_r']} R / {r['regimes'][k]['closed_trades']}"
+                       + (" · INSUFFICIENT_SAMPLE" if r["regimes"][k]["sample"] != "OK" else "") for r in reg_rows]]
+                 for k in reg_rows[0]["regimes"]]))
+        news_rows = [r for r in d["rows"] if r.get("news_comparison")]
+        if news_rows and news_rows[0]["news_comparison"]["status"] == "COMPARED":
+            out.append(f"<h2>News comparison ({e(d.get('news_snapshot_id'))})</h2>" + table(
+                ["News handling", *[r["strategy_id"] for r in news_rows]],
+                [[m, *[f"{r['news_comparison'][m]['expectancy_r']} R / {r['news_comparison'][m]['closed_trades']}"
+                       f" closed, blocked {r['news_comparison'][m]['no_trade_share']}" for r in news_rows]]
+                 for m in ("none", "legacy", "upgraded")]))
+        elif news_rows:
+            out.append("<p class='warn'>News comparison: BLOCKED_BY_DATA (no historical news snapshot).</p>")
         out.append("<h2>Runs</h2>" + table(["Run", "Strategy", "Kind", "Hash"], [
             [link(f"/runs/{r['run_id']}", r["run_id"]), r["strategy_id"], r["kind"], r["strategy_hash"]]
             for r in d["runs"]], raw_cols=(0,)))
@@ -415,6 +454,17 @@ class App:
             rows = [[k, *[v.get(c) for c in self.LAB_CELLS]] for k, v in cells.items() if "closed_trades" in v]
             if rows:
                 out.append(f"<h2>By {e(group)}</h2>" + table(["Cell", *self.LAB_CELLS], rows))
+        reg = mt.get("regime")
+        if reg:
+            out.append(f"<h2>By regime ({e(reg['detector']['detector_id'])} {e(reg['detector']['version'])})</h2>"
+                       + table(["Regime", *self.LAB_CELLS], [[k, *[v.get(c) for c in self.LAB_CELLS]]
+                                                              for k, v in reg["matrix"].items()]))
+        nc = mt.get("news_comparison")
+        if nc and nc.get("modes"):
+            out.append("<h2>News comparison</h2>" + table(["News handling", *self.LAB_CELLS], [
+                [k, *[v.get(c) for c in self.LAB_CELLS]] for k, v in nc["modes"].items()]))
+        elif nc:
+            out.append(f"<p class='warn'>News comparison: {e(nc['status'])}. {e(nc['note'])}</p>")
         rob = mt.get("robustness")
         if rob:
             out.append("<h2>Cost sensitivity</h2>" + table(["Cost model", *self.LAB_CELLS], [
@@ -430,9 +480,11 @@ class App:
         if mt.get("benchmark_parity"):
             out.append(f"<p>Benchmark parity with the legacy replay: {e(mt['benchmark_parity']['status'])}</p>")
         out.append(f"<h2>Research candidates ({len(cands)}, not executable)</h2>" + table(
-            ["As of (UTC)", "Pair", "Direction", "Proposed state", "Replay", "R", "Flags", "Reasons"],
+            ["As of (UTC)", "Pair", "Direction", "Proposed state", "Replay", "R", "Regime", "News", "Flags",
+             "Reasons"],
             [[c["asof_utc"], c["pair"], c["direction"], c["proposed_state"], c["replay_status"], c["outcome_r"],
-              ", ".join(c.get("flags", [])), ", ".join(c["rejection_codes"])] for c in cands[:300]]))
+              c.get("regime", "-"), c.get("news_phase") or "-", ", ".join(c.get("flags", [])),
+              ", ".join(c["rejection_codes"])] for c in cands[:300]]))
         return "".join(out)
 
     def export_comparison(self, ws, cid: str, name: str) -> tuple[int, str, bytes, dict[str, str]]:

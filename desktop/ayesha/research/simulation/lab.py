@@ -2,10 +2,16 @@
 common runner, with after-cost metrics, robustness checks and hypothetical account scenarios.
 
 Like the v0.9.0 baseline run, the run id is the hash of every input (dataset, symbols, strategy id/version/hash,
-parameters, cost models, account scenario, news snapshot, split plan, code version), so the same inputs give the
+parameters, cost models, account scenario, news snapshot and news mode, regime detector, split plan, code version),
+so the same inputs give the
 same run id and `verify=True` recomputes a finished run and compares the result hash (plan T01). The result document
 holds no timestamps inside its hashed core. Everything is research only: candidates are `executable: false`, the
 decision states have no live value, nothing reaches the phone.
+
+v1.1.0: every order carries the as-of regime label known when it was decided (`ayesha.research.regimes`) and the
+result has a strategy x regime matrix. News is modelled only from a frozen news snapshot
+(`ayesha.research.datasets.news_snapshot`); then each run also shows the same strategy with news off, with the
+legacy fixed window and with the upgraded guard. Without a snapshot that comparison is `BLOCKED_BY_DATA`.
 """
 
 from __future__ import annotations
@@ -15,9 +21,11 @@ import json
 from typing import Any
 
 from ayesha.research.contracts import check
+from ayesha.research.datasets import news_snapshot
 from ayesha.research.evaluation import metrics as M
 from ayesha.research.provenance import (canonical_json, commit_sha, desktop_version, digest, environment_hash, iso,
                                          parse_iso, sha256_bytes, utc_now)
+from ayesha.research.regimes import detector
 from ayesha.research.simulation import portfolio, runner
 from ayesha.research.simulation.baseline import STATE, RunRefused, load_candles
 from ayesha.research.simulation.costs import BASE, SENSITIVITY
@@ -25,8 +33,10 @@ from ayesha.research.storage.db import ResearchDBError
 from ayesha.research.strategies import loader
 from ayesha.research.workspace import Workspace
 
-LIMITATIONS = ["HISTORICAL_SIMULATION_NOT_A_FORECAST", "NEWS_NOT_MODELLED", "PRICES_NOT_EXNESS",
-               "ASSUMED_EXNESS_STANDARD_CONTRACT", "NOT_EXECUTABLE_RESEARCH_ONLY", "REGIME_NOT_MODELLED"]
+LIMITATIONS = ["HISTORICAL_SIMULATION_NOT_A_FORECAST", "PRICES_NOT_EXNESS", "ASSUMED_EXNESS_STANDARD_CONTRACT",
+               "NOT_EXECUTABLE_RESEARCH_ONLY"]
+NO_NEWS = "NONE:NEWS_NOT_MODELLED"
+NEWS_COMPARE = ("none", "legacy", "upgraded")
 
 
 def _symbols(symbols: list[str] | str) -> list[str]:
@@ -64,9 +74,32 @@ def plan_for(ws: Workspace, dataset_id: str, symbols: list[str], folds: int, spl
     return plan, candles
 
 
+def news_for(ws: Workspace, news_snapshot_id: str | None, news_mode: str, dataset_id: str,
+             symbols: list[str]) -> tuple[dict[str, Any] | None, dict[str, runner.NewsInput] | None]:
+    """The snapshot's manifest and one point-in-time news input per symbol (with the dataset's M5 bars for the
+    reaction watch when it has them), or (None, None) when news is not modelled."""
+    if not news_snapshot_id:
+        return None, None
+    if news_mode not in runner.NEWS_MODES:
+        raise RunRefused(f"news mode must be one of {', '.join(runner.NEWS_MODES)}")
+    try:
+        man, cal = news_snapshot.load(ws, news_snapshot_id)
+    except news_snapshot.NewsSnapshotError as e:
+        raise RunRefused(str(e)) from None
+    out = {}
+    for s in symbols:
+        try:
+            m5 = load_candles(ws, dataset_id, s, "M5") or None
+        except RunRefused:
+            m5 = None
+        out[s] = runner.NewsInput(cal, news_mode, m5)
+    return man, out
+
+
 def lab_inputs(ws: Workspace, spec: dict[str, Any], strategy_id: str, dataset_id: str, symbols: list[str],
                plan: dict[str, Any], account_type: str, allow_degraded: bool, robustness: bool,
-               reveal_holdout: bool) -> tuple[dict[str, Any], dict[str, Any]]:
+               reveal_holdout: bool, news_snapshot_id: str | None = None,
+               news_mode: str = "upgraded") -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         man = loader.manifest(strategy_id, spec)
     except loader.StrategyError as e:
@@ -78,7 +111,8 @@ def lab_inputs(ws: Workspace, spec: dict[str, Any], strategy_id: str, dataset_id
         "cost_model_id": f"{BASE.model_id}#{BASE.hash}",
         "sensitivity_models": [f"{c.model_id}#{c.hash}" for c in SENSITIVITY] if robustness else [],
         "account_scenario_id": f"HYPOTHETICAL:{account_type}:USD20-5000",
-        "news_snapshot_id": "NONE:NEWS_NOT_MODELLED",
+        "news_snapshot_id": news_snapshot_id or NO_NEWS, "news_mode": news_mode if news_snapshot_id else "none",
+        "regime_detector": f"{detector.DETECTOR_ID}@{detector.VERSION}#{detector.manifest()['code_sha256'][:16]}",
         "split_plan_id": plan["split_plan_id"], "split_plan": plan,
         "reveal_holdout": bool(reveal_holdout), "robustness": bool(robustness),
         "commit_sha": commit_sha(), "desktop_version": desktop_version(), "allow_degraded": bool(allow_degraded),
@@ -86,16 +120,26 @@ def lab_inputs(ws: Workspace, spec: dict[str, Any], strategy_id: str, dataset_id
     return inputs, man
 
 
-def _replay(spec, strategy_id, candles, cost=BASE, overrides=None, account_type="Standard") -> tuple[list, int, list]:
+def _replay(spec, strategy_id, candles, cost=BASE, overrides=None, account_type="Standard", news=None,
+            info=None) -> tuple[list, int, list]:
     lts, bars, rej = [], 0, []
     for s in sorted(candles):
         st, _ = loader.load(strategy_id, s, spec, overrides)
-        r = runner.run(s, candles[s], spec, st, cost, account_type=account_type)
+        r = runner.run(s, candles[s], spec, st, cost, account_type=account_type,
+                       news=news.get(s) if news else None)
         lts += r["trades"]
         bars += r["bars"]
         rej += r["rejections"]
+        if info is not None:
+            info[s] = {"news_integrity": r["news_integrity"], "news_stability_bars": r["news_stability_bars"]}
     lts.sort(key=lambda lt: (lt.created_at, lt.symbol, lt.trade.signal.signal_id))
     return lts, bars, rej
+
+
+def _modes(news: dict[str, runner.NewsInput], mode: str) -> dict[str, runner.NewsInput] | None:
+    if mode == "none":
+        return None
+    return {s: runner.NewsInput(n.calendar, mode, n.m5) for s, n in news.items()}
 
 
 def _visible(lts, plan, reveal):
@@ -106,9 +150,10 @@ def _visible(lts, plan, reveal):
 
 
 def benchmark_parity(spec: dict[str, Any], candles: dict[str, list], lab_trades: list,
-                     account_type: str = "Standard") -> dict[str, Any]:
-    """Baseline A through the common runner versus the unchanged legacy replay on the same bars: every order's
-    id, status, fill and exit bar, exit reason, R and blockers must be equal."""
+                     account_type: str = "Standard", news: dict[str, runner.NewsInput] | None = None
+                     ) -> dict[str, Any]:
+    """Baseline A through the common runner versus the unchanged legacy replay on the same bars (and the same news
+    calendar and mode): every order's id, status, fill and exit bar, exit reason, R and blockers must be equal."""
     from ayesha.backtest.replay import run_backtest
 
     sp = copy.deepcopy(spec)
@@ -117,7 +162,10 @@ def benchmark_parity(spec: dict[str, Any], candles: dict[str, list], lab_trades:
                      list(t.blockers)]
     per = {}
     for s in sorted(candles):
-        leg = run_backtest(s, candles[s], sp, account_type=account_type, usd_rates=runner.APPROX_USD_RATES)
+        n = news.get(s) if news else None
+        leg = run_backtest(s, candles[s], sp, account_type=account_type, usd_rates=runner.APPROX_USD_RATES,
+                           calendar=n.calendar if n else None, news_mode=n.mode if n else None,
+                           m5_candles=n.m5 if n else None)
         a = [row(lt.trade) for lt in lab_trades if lt.symbol == s]
         b = [row(t) for t in leg["trades"]]
         diff = [x[0] for x, y in zip(a, b) if x != y]
@@ -125,7 +173,8 @@ def benchmark_parity(spec: dict[str, Any], candles: dict[str, list], lab_trades:
                   "sha256": [digest(a), digest(b)]}
     ok = all(v["equal"] for v in per.values())
     return {"status": "MATCHED" if ok else "DIFFERENT", "per_symbol": per,
-            "legacy_engine": "ayesha.backtest.replay.run_backtest (unchanged 0.8.0 code), news not modelled",
+            "legacy_engine": "ayesha.backtest.replay.run_backtest (unchanged 0.8.0 code), " + (
+                f"news mode {next(iter(news.values())).mode} on the same calendar" if news else "news not modelled"),
             "note": "Parity shows the common runner replays the frozen rules exactly like the legacy path. "
                     "It says nothing about whether any strategy has an edge."}
 
@@ -143,15 +192,18 @@ def _candidate(lt, inputs, run_id) -> dict[str, Any]:
         "proposed_state": STATE.get(t.status, "UNRESOLVED"), "replay_status": t.status, "outcome_r": t.r,
         "rejection_codes": list(t.blockers), "explanation": " | ".join(s.trace[:3])[:600],
         "flags": list(lt.flags), "fill_utc": iso(t.fill_time), "exit_utc": iso(t.exit_time),
-        "exit_reason": t.exit_reason,
+        "exit_reason": t.exit_reason, "regime": lt.regime,
+        "news_phase": None if t.news_phase == "NOT_MODELLED" else t.news_phase,
     }, "research.candidate/1")
 
 
 def _compute(ws: Workspace, spec: dict[str, Any], inputs: dict[str, Any], run_id: str, quality: str,
-             candles: dict[str, list]) -> tuple[dict[str, Any], bytes, list[tuple], list[tuple]]:
+             candles: dict[str, list], news: dict[str, runner.NewsInput] | None = None,
+             news_man: dict[str, Any] | None = None) -> tuple[dict[str, Any], bytes, list[tuple], list[tuple]]:
     sid, plan, acct = inputs["strategy_id"], inputs["split_plan"], inputs["account_scenario_id"].split(":")[1]
     reveal = inputs["reveal_holdout"]
-    lts, bars, rej = _replay(spec, sid, candles, account_type=acct)
+    info: dict[str, Any] = {}
+    lts, bars, rej = _replay(spec, sid, candles, account_type=acct, news=news, info=info)
     vis = _visible(lts, plan, reveal)
     per = M.periods(lts, plan, reveal, bars)
     met: dict[str, Any] = {
@@ -161,6 +213,8 @@ def _compute(ws: Workspace, spec: dict[str, Any], inputs: dict[str, Any], run_id
         "breakdowns": M.breakdowns(vis), "bars": bars,
         "rejections": {}, "cost_model": BASE.as_dict(),
         "account_scenarios": portfolio.scenarios(vis, spec, acct),
+        "regime": {"detector": detector.manifest(), "matrix": M.regime_matrix(vis, detector.LABELS),
+                   "note": "label known when each order was decided; context only, never a gate or a permission"},
     }
     for r in rej:
         met["rejections"][r.reason] = met["rejections"].get(r.reason, 0) + 1
@@ -170,7 +224,7 @@ def _compute(ws: Workspace, spec: dict[str, Any], inputs: dict[str, Any], run_id
                                "excluding_intrabar_ambiguous": M.compact(M.summary(
                                    [lt for lt in vis if "AMBIGUOUS_STOP_AND_TARGET_SAME_BAR" not in lt.flags]))}
         for cm in SENSITIVITY:
-            v, _, _ = _replay(spec, sid, candles, cm, account_type=acct)
+            v, _, _ = _replay(spec, sid, candles, cm, account_type=acct, news=news)
             rob["costs"][cm.model_id] = M.compact(M.summary(_visible(v, plan, reveal)))
         params = {}
         cls = loader.REGISTRY[sid]
@@ -179,19 +233,48 @@ def _compute(ws: Workspace, spec: dict[str, Any], inputs: dict[str, Any], run_id
                 if not d.ok(v):
                     continue
                 try:
-                    pv, _, _ = _replay(spec, sid, candles, overrides={k: v}, account_type=acct)
+                    pv, _, _ = _replay(spec, sid, candles, overrides={k: v}, account_type=acct, news=news)
                 except (ValueError, loader.StrategyError) as e:
                     params[f"{k}={v:g}"] = {"error": str(e)}
                     continue
                 params[f"{k}={v:g}"] = M.compact(M.summary(_visible(pv, plan, reveal)))
         rob["parameters"] = params or {"note": "frozen strategy: parameters are not perturbed"}
         met["robustness"] = rob
+    if news:
+        mode = inputs["news_mode"]
+        met["news"] = {"news_snapshot_id": inputs["news_snapshot_id"], "mode": mode,
+                       "snapshot_decision": news_man["integrity"]["decision"], "provider": news_man["provider"],
+                       "per_symbol": info, "news_direction": news_snapshot.NEWS_DIRECTION}
+        cmp_rows = {}
+        for m in NEWS_COMPARE:
+            v = lts if m == mode else _replay(spec, sid, candles, account_type=acct, news=_modes(news, m))[0]
+            cmp_rows[m] = M.compact(M.summary(_visible(v, plan, reveal)))
+        met["news_comparison"] = {"status": "COMPARED", "modes": cmp_rows,
+                                  "note": "same strategy, data and costs; only the news handling differs. "
+                                          "News direction is never backtested."}
+    else:
+        met["news"] = {"news_snapshot_id": NO_NEWS, "mode": "none"}
+        met["news_comparison"] = {"status": "BLOCKED_BY_DATA",
+                                  "note": "no historical news snapshot was given (research news-ingest): news is "
+                                          "not modelled and no news comparison is possible"}
     if sid == loader.LAB_ORDER[0]:
-        met["benchmark_parity"] = benchmark_parity(spec, candles, lts, acct)
+        met["benchmark_parity"] = benchmark_parity(spec, candles, lts, acct, news)
     shown = vis
     cands = [_candidate(lt, inputs, run_id) for lt in shown]
     closed = per["all"]["closed_trades"]
     limitations = list(LIMITATIONS)
+    integ = [w for d in info.values() if d["news_integrity"] for w in d["news_integrity"]["warnings"]]
+    if news:
+        limitations.append("NEWS_DIRECTION_NOT_BACKTESTED")
+        if news_man["integrity"]["decision"] == "DEGRADED":
+            limitations.append("DEGRADED_NEWS_DATA")
+        if any(w.startswith("INCOMPLETE_NEWS_DATA") for w in integ):
+            limitations.append("NEWS_COVERAGE_INCOMPLETE")
+        no_m5 = any(d["news_stability_bars"] != "M5 closed bars" for d in info.values())
+        if no_m5 and inputs["news_mode"] == "upgraded":
+            limitations.append("NEWS_REACTION_WATCH_WITHOUT_M5")
+    else:
+        limitations.append("NEWS_NOT_MODELLED")
     if closed < M.MIN_SAMPLE:
         limitations.append("SMALL_SAMPLE")
     if quality == "DEGRADED":
@@ -203,7 +286,13 @@ def _compute(ws: Workspace, spec: dict[str, Any], inputs: dict[str, Any], run_id
     warnings = []
     if closed < M.MIN_SAMPLE:
         warnings.append(f"Only {closed} closed trades: far too few to conclude anything (need {M.MIN_SAMPLE}+).")
-    warnings.append("News was not modelled: the live strict news gate would block some of these orders.")
+    if news:
+        warnings.append(f"News: {inputs['news_mode']} handling on snapshot {inputs['news_snapshot_id']} "
+                        f"({news_man['integrity']['decision']}); {news_snapshot.NEWS_DIRECTION}.")
+        warnings += [f"{s}: {w}" for s, d in sorted(info.items()) if d["news_integrity"]
+                     for w in d["news_integrity"]["warnings"]]
+    else:
+        warnings.append("News was not modelled: the live strict news gate would block some of these orders.")
     if plan["holdout_from"] and not reveal:
         warnings.append(f"Holdout from {plan['holdout_from']} is sealed: {per['holdout']['orders']} orders not shown.")
     decisions = [(c["research_candidate_id"], c["asof_utc"], c["pair"], c["proposed_state"],
@@ -230,12 +319,14 @@ def _compute(ws: Workspace, spec: dict[str, Any], inputs: dict[str, Any], run_id
 def run_strategy(ws: Workspace, spec: dict[str, Any], strategy_id: str, dataset_id: str, symbols, folds: int = 4,
                  split: str | None = None, holdout: str | None = None, reveal_holdout: bool = False,
                  account_type: str = "Standard", allow_degraded: bool = False, robustness: bool = True,
-                 verify: bool = False) -> dict[str, Any]:
+                 verify: bool = False, news_snapshot_id: str | None = None,
+                 news_mode: str = "upgraded") -> dict[str, Any]:
     ds = check_dataset(ws, dataset_id, allow_degraded)
     syms = _symbols(symbols)
     plan, candles = plan_for(ws, dataset_id, syms, folds, split, holdout)
+    news_man, news = news_for(ws, news_snapshot_id, news_mode, dataset_id, syms)
     inputs, man = lab_inputs(ws, spec, strategy_id, dataset_id, syms, plan, account_type, allow_degraded,
-                             robustness, reveal_holdout)
+                             robustness, reveal_holdout, news_snapshot_id, news_mode)
     run_id = "run_" + digest(inputs)[:16]
     old = ws.db.run(run_id)
     if old is not None and old["status"] == "COMPLETED":
@@ -243,7 +334,7 @@ def run_strategy(ws: Workspace, spec: dict[str, Any], strategy_id: str, dataset_
         if not verify:
             return {"run_id": run_id, "status": "COMPLETED", "existing": True, "strategy_id": strategy_id,
                     "result_sha256": stored["result_sha256"], "artifact_sha256": old["result_sha"]}
-        core, _, _, _ = _compute(ws, spec, inputs, run_id, ds["quality_state"], candles)
+        core, _, _, _ = _compute(ws, spec, inputs, run_id, ds["quality_state"], candles, news, news_man)
         rec = digest(core)
         ws.store.get("candidates", old["candidates_sha"], ".jsonl")
         ok = rec == stored["result_sha256"] and core["candidates_sha256"] == stored["candidates_sha256"]
@@ -258,7 +349,8 @@ def run_strategy(ws: Workspace, spec: dict[str, Any], strategy_id: str, dataset_
     started = utc_now()
     ws.db.start_run(run_id, inputs)
     try:
-        core, c_bytes, decisions, rows = _compute(ws, spec, inputs, run_id, ds["quality_state"], candles)
+        core, c_bytes, decisions, rows = _compute(ws, spec, inputs, run_id, ds["quality_state"], candles, news,
+                                                  news_man)
         result_sha = digest(core)
         c_sha, c_path = ws.store.put("candidates", c_bytes, ".jsonl")
         result = check({

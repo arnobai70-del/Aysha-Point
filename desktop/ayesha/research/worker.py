@@ -40,7 +40,8 @@ from typing import Any, Callable
 EXIT_OK, EXIT_REFUSED, EXIT_RESOURCE, EXIT_FAILED, EXIT_BUSY, EXIT_CANCELLED = 0, 2, 3, 70, 75, 130
 STATUS_BY_EXIT = {EXIT_OK: "OK", EXIT_REFUSED: "REFUSED", EXIT_RESOURCE: "RESOURCE_LIMIT", EXIT_FAILED: "FAILED",
                   EXIT_CANCELLED: "CANCELLED"}
-KINDS = ("ingest_csv", "ingest_oanda", "baseline", "parity", "strategy", "lab", "compare", "selftest")
+KINDS = ("ingest_csv", "ingest_oanda", "baseline", "parity", "strategy", "lab", "compare", "news_ingest",
+         "feed_audit", "selftest")
 SELFTESTS = ("ok", "crash", "hang", "memory")
 LOCK_OFFSET = 1 << 20  # Windows: lock a byte far past the PID text so other processes can still read the PID
 
@@ -285,6 +286,16 @@ def _dispatch(job: dict[str, Any]) -> dict[str, Any]:
             d = compare(ws, list(a["run_ids"]))
             return {"comparison_id": d["comparison_id"], "ranking": d["ranking"]["state"],
                     "benchmark_parity": d["benchmark_parity"].get("status")}
+        if kind == "news_ingest":
+            from ayesha.research.datasets.news_snapshot import ingest
+
+            return ingest(ws, a["file"], a.get("provider") or "", a.get("license") or "", label=a.get("label") or "")
+        if kind == "feed_audit":
+            from ayesha.research.datasets.feed_audit import audit
+
+            d = audit(ws, a["dataset_a"], a["dataset_b"], a["symbol"], a.get("timeframe") or "M15")
+            return {"feed_audit_id": d["feed_audit_id"], "status": d["status"],
+                    "common_bars": d["overlap"]["common_bars"], "close_p95_pips": d["differences"]["close"]["p95"]}
         raise ValueError(f"unknown job kind {kind!r}")
     finally:
         ws.close()
@@ -293,7 +304,8 @@ def _dispatch(job: dict[str, Any]) -> dict[str, Any]:
 def _lab_args(a: dict[str, Any]) -> dict[str, Any]:
     return {"folds": int(a.get("folds") or 4), "split": a.get("split"), "holdout": a.get("holdout"),
             "reveal_holdout": bool(a.get("reveal_holdout")), "account_type": a.get("account_type") or "Standard",
-            "allow_degraded": bool(a.get("allow_degraded")), "robustness": not a.get("quick")}
+            "allow_degraded": bool(a.get("allow_degraded")), "robustness": not a.get("quick"),
+            "news_snapshot_id": a.get("news") or None, "news_mode": a.get("news_mode") or "upgraded"}
 
 
 def _refusals() -> tuple[type[BaseException], ...]:
@@ -301,14 +313,15 @@ def _refusals() -> tuple[type[BaseException], ...]:
     from ayesha.research.config import ResearchConfigError, ResearchDisabled
     from ayesha.research.contracts import ContractError
     from ayesha.research.datasets.ingest import IngestError
+    from ayesha.research.datasets.news_snapshot import NewsSnapshotError
     from ayesha.research.datasets.store import IntegrityError
     from ayesha.research.simulation.baseline import RunRefused
     from ayesha.research.storage.db import ResearchDBError
     from ayesha.research.strategies.loader import StrategyError
 
     return (ResearchDisabled, ResearchConfigError, ContractError, IngestError, IntegrityError, RunRefused,
-            ResearchDBError, StrategyError, AuthRejected, MissingToken, FileNotFoundError, NotADirectoryError,
-            KeyError)
+            ResearchDBError, StrategyError, NewsSnapshotError, AuthRejected, MissingToken, FileNotFoundError,
+            NotADirectoryError, KeyError)
 
 
 def child_main(argv: list[str] | None = None) -> int:

@@ -1,12 +1,12 @@
 {
-  "release": "1.0.0",
+  "release": "1.1.0",
   "components": {
-    "desktop": "1.0.0",
+    "desktop": "1.1.0",
     "android_app": "0.5.0",
     "strategy": "0.4.0",
     "signal_schema": "1.1",
     "phone_wire_format": "4",
-    "research_contracts": "2"
+    "research_contracts": "3"
   },
-  "notes": "One release number for the whole repo (CHANGELOG). Components keep their own versions; the Android release tag is android-v<android_app>-b<build>. The strategy hash (StrategyInfo.HASH / Pine STRATEGY_HASH) identifies the exact rule set. research_contracts is the schema generation of contracts/research/ (2 = v1.0.0: research.comparison/1 added, additive fields on result, candidate and strategy); the research plane is research-only and never changes the strategy, the signal schema or the phone wire format."
+  "notes": "One release number for the whole repo (CHANGELOG). Components keep their own versions; the Android release tag is android-v<android_app>-b<build>. The strategy hash (StrategyInfo.HASH / Pine STRATEGY_HASH) identifies the exact rule set. research_contracts is the schema generation of contracts/research/ (2 = v1.0.0: research.comparison/1 added, additive fields on result, candidate and strategy; 3 = v1.1.0: research.news-snapshot/1 and research.feed-audit/1 added, additive regime/news fields on candidate and comparison); the research plane is research-only and never changes the strategy, the signal schema or the phone wire format."
 }

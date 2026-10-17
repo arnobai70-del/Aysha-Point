@@ -148,6 +148,24 @@
         "string",
         "null"
       ]
+    },
+    "regime": {
+      "enum": [
+        "TREND_UP",
+        "TREND_DOWN",
+        "RANGE",
+        "HIGH_VOL",
+        "TRANSITION",
+        "UNKNOWN"
+      ],
+      "description": "as-of regime label known when the order was decided (v1.1.0 lab runs); context only, never a gate"
+    },
+    "news_phase": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "news phase at the decision when a news snapshot was used (v1.1.0)"
     }
   }
 }
