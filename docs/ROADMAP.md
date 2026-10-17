@@ -52,13 +52,16 @@ See `CHANGELOG.md` for details. Checklist items in the master spec are only tick
 - Still blocked: phase 3 (edge validation) needs the owner's OANDA history run, and the news comparison also needs a
   permitted historical calendar. Then the 30-day demo forward test (phase 7). No new setups until that evidence exists.
 
-## 2026-10-16 Hybrid Advanced AI plan (releases 0.9.0 and 1.0.0)
+## 2026-10-16 Hybrid Advanced AI plan (releases 0.9.0, 1.0.0 and 1.1.0)
 - The owner's plan [HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md) adds a research plane next to the advisory
-  path. Order: CP-00 audit (done) → v0.9.0 research foundation (merged to `main` as `aad8dbd`) → **v1.0.0 Strategy
-  Lab** (built on branch `research/v1.0.0`, waiting for the owner's merge approval) → v1.1.0 regimes and historical
-  news → v1.2.0 optional ML → v1.3.0 phone research tab. Each milestone is its own branch and pull request.
+  path. Order: CP-00 audit (done) → v0.9.0 research foundation (merged to `main` as `aad8dbd`) → v1.0.0 Strategy
+  Lab (merged to `main` as `57b6a71`) → **v1.1.0 regimes and historical news** (built on branch `research/v1.1.0`,
+  waiting for the owner's merge approval) → v1.2.0 optional ML → v1.3.0 phone research tab. Each milestone is its
+  own branch and pull request.
 - Research is off by default and never a READY source; the advisory path stays exactly 0.8.0 (golden fingerprint).
 - The earlier gates still hold: phase 3 (real-data edge validation) and the 30-day forward test come before any new
-  live setup. v1.0.0 needs the owner's real OANDA dataset to say anything; v1.1.0 news comparison needs a permitted
-  historical calendar (BLOCKED BY DATA); v1.2.0 ML only with enough validated real data.
+  live setup. v1.0.0 and v1.1.0 need the owner's real OANDA dataset to say anything; the v1.1.0 news comparison
+  needs a licensed historical calendar with `observed_utc` and `actual_published_utc` (until then BLOCKED BY DATA),
+  and the feed audit needs an Exness chart export to say anything about Exness; v1.2.0 ML only with enough
+  validated real data.
 

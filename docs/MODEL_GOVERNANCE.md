@@ -3,9 +3,11 @@
 Who may decide what. Applies to every research strategy, regime label and (later) machine-learning model. Source:
 plan §0, §2.4, §6.2, §8 and §16 in [HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md).
 
-**Release 1.0.0 contains no machine-learning model and no LLM.** The research strategies are the frozen legacy
+**Release 1.1.0 contains no machine-learning model and no LLM.** The research strategies are the frozen legacy
 baseline `baseline-sweep-mss-fvg` (A), the control `control-london-orb` (B) and the one experimental strategy
 `experimental-h1h4-trend` (C), all replayed on frozen data. None of them is validated; there is no trading edge yet.
+1.1.0 adds one deterministic regime detector (`regime-h4-er-slope-vol` 1.0.0, rules, not a learned model) whose
+labels are context only, and historical news from licensed frozen snapshots; news direction is never backtested.
 
 ## 1. Authority
 
@@ -18,7 +20,7 @@ baseline `baseline-sweep-mss-fvg` (A), the control `control-london-orb` (B) and 
 4. Research output is labelled `RESEARCH`, `executable: false`, and is shown as **RESEARCH ONLY / HYPOTHETICAL**. It
    never uses the word READY.
 
-## 2. Locks enforced in code (0.9.0, extended in 1.0.0)
+## 2. Locks enforced in code (0.9.0, extended in 1.0.0 and 1.1.0)
 
 | Lock | Where | Effect if someone edits it |
 |---|---|---|
@@ -32,6 +34,9 @@ baseline `baseline-sweep-mss-fvg` (A), the control `control-london-orb` (B) and 
 | Research signals look nothing like live ones | ids `rs` + hash of strategy, version, pair, time, direction, entry; grade `RESEARCH`; no score | `test_research_signal_ids_cannot_collide_with_live_ids` |
 | A comparison never promotes | `research.comparison/1`: `executable: false`, ranking only `NO_RANKING` or `IN_SAMPLE_ORDER_ONLY`; refused unless dataset, symbols, split, holdout state, costs and account are identical | `test_comparison_refuses_different_inputs` |
 | The holdout is looked at on purpose | Results after `--holdout` are only computed with `--reveal-holdout`, a separate run recorded as `HOLDOUT_REVEALED` in the audit trail | `test_revealing_the_holdout_is_a_new_audited_run` |
+| A regime label is never a gate (1.1.0) | The runner records the label known at decision time on the order (`LabTrade.regime`) and nowhere reads it to block, allow or size; labels come from closed H4 bars only and are never rewritten; the detector has a version and a code hash in every result | `test_regime_labels_are_causal`, `test_lab_orders_carry_the_regime_known_at_decision` |
+| News only from a licensed, frozen source (1.1.0) | `research news-ingest` refuses a file without a provider or licence statement; REJECTED snapshots cannot be loaded; an unknown snapshot id is `BLOCKED_BY_DATA`; replays see the calendar only through the point-in-time `AsOfCalendar` | `test_news_snapshot_needs_a_licence_and_is_content_addressed`, `test_news_snapshot_integrity_decisions` |
+| Comparisons on the same news and regime inputs (1.1.0) | `research.comparison/1` also requires the same `news_snapshot_id`, `news_mode` and `regime_detector` | `test_lab_with_a_snapshot_compares_news_modes` |
 
 ## 3. Strategy registration (v1.0.0 onwards)
 
@@ -49,6 +54,14 @@ strategy's source file, so editing the code without a new version is visible. Ru
 - A strategy that looks best in hindsight does not become live. See section 5.
 - Changing a rule or a default of B or C means a new version and a new hash; old runs keep their old id. Adding a
   second experimental strategy (plan Experimental D) is a new milestone, not an edit.
+
+### Regime detector (v1.1.0 onwards)
+
+- The thresholds of `regime-h4-er-slope-vol` were pre-registered before any real data was seen (DECISIONS.md,
+  2026-10-17). Changing a threshold, a window or a rule means a new detector version; it is never tuned to make a
+  strategy look better in a regime.
+- A regime cell with fewer than 30 closed trades is `INSUFFICIENT_SAMPLE`. No strategy is ranked, chosen or switched
+  on by regime, and a strategy that looks good in one regime in hindsight does not become live (section 5).
 
 ## 4. Machine learning (v1.2.0, optional, only with enough validated real data)
 
@@ -74,7 +87,7 @@ Not built. When it is, these rules apply (plan §8):
 
 ## 5. Promotion to live advice
 
-Not possible in 0.9.0 or 1.0.0 (`promotion_enabled` is locked off). Any future link from research to the live
+Not possible in 0.9.0, 1.0.0 or 1.1.0 (`promotion_enabled` is locked off). Any future link from research to the live
 advisory path needs all of:
 
 1. a separate written change specification approved by the owner;

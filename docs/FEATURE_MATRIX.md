@@ -56,22 +56,24 @@ see bank orders; "institutional" items are price-behavior hypotheses only.
 | P2 legacy 30/30 vs upgraded on the same candles, point-in-time, OOS, CIs, sample sizes | ✅ tooling | n/a | **NOT RUN on real data**: needs OANDA history and a permitted historical calendar |
 | P2 feasibility at $20/$25/$30/$100/$500/$1,000/$5,000 and adaptive account | ✅ tooling | n/a | hypothetical replay at assumed contract values, not a forecast |
 
-## Hybrid Advanced AI plan v1.0 (release 0.9.0 research foundation, 1.0.0 Strategy Lab; off by default)
+## Hybrid Advanced AI plan v1.0 (release 0.9.0 research foundation, 1.0.0 Strategy Lab, 1.1.0 regimes and news; off by default)
 
 | Plan item | Research plane | Live path | Notes |
 |---|---|---|---|
 | §2.4 isolation contract (off by default, scanner never imports research, separate worker, read-only legacy DB) | ✅ | unchanged | `check_research_isolation.py` in CI; golden fingerprint T06 |
-| §4 namespaced contracts (`research.*/1`) | ✅ 9 schemas (comparison added in 1.0.0) | unchanged (spec 0.4.0, schema 1.1, wire 4) | candidates `executable: false`, never READY |
+| §4 namespaced contracts (`research.*/1`) | ✅ 11 schemas (comparison added in 1.0.0; news-snapshot and feed-audit in 1.1.0) | unchanged (spec 0.4.0, schema 1.1, wire 4) | candidates `executable: false`, never READY |
 | §5.1–5.2 frozen datasets with quality gate (PASS / DEGRADED / REJECTED) | ✅ OANDA practice or exported CSV | n/a | ASK high/low never invented; nothing filled in |
+| §11 v1.1.0 broker-feed mismatch audit | ✅ `research feed-audit` (MATCHED / DIFFERENT / INSUFFICIENT_OVERLAP, fixed thresholds) | n/a | neither feed is the broker's truth; Exness parity **UNVERIFIED** until an Exness export is audited and MATCHED |
 | §5.3–5.4 research folder and `research.db` (migrations, audit, backup/restore) | ✅ | `ayesha.db` only read (mode=ro) | `feature_sets`, `model_registry`, `model_approvals` not created yet |
 | §6.1 Baseline A (SWEEP_MSS_FVG frozen) + parity with `ayesha backtest` | ✅ | n/a | real-data run **PENDING OWNER** |
 | §6.1 Control B, Experimental C, strategy registry | ✅ B London ORB, C H1/H4 trend, built-in registry | n/a | Experimental D not built (one experiment per milestone); real-data run **PENDING OWNER** |
-| §6.3 common runner, causality, intrabar ambiguity, cost variants, portfolio simulation | ✅ legacy fills, flags, 4 sensitivity models, live risk engine on dynamic equity | n/a | news not modelled; contract values ASSUMED |
+| §6.3 common runner, causality, intrabar ambiguity, cost variants, portfolio simulation | ✅ legacy fills, flags, 4 sensitivity models, live risk engine on dynamic equity | n/a | news only with a snapshot (1.1.0), otherwise not modelled; contract values ASSUMED |
 | §6.4 after-cost metrics and side-by-side comparison | ✅ `research lab`, `compare`, dashboard Strategy Lab | n/a | ranking only with 100+ closed trades per strategy |
-| §7 regimes, strategy × regime matrix, historical news | ❌ | n/a | v1.1.0; historical news **BLOCKED BY DATA** |
+| §7.1–7.2 as-of regimes, strategy × regime matrix | ✅ `regime-h4-er-slope-vol` 1.0.0, regime known at decision on every lab order, `INSUFFICIENT_SAMPLE` cells, `research regime` | n/a | context only, never a gate; thresholds pre-registered; real-data run **PENDING OWNER** |
+| §7.3 historical news (as-of) | ✅ licensed frozen snapshots (`research news-ingest`), legacy/upgraded gating like the legacy replay, `research lab --news` | n/a | news direction never backtested; without a snapshot `BLOCKED_BY_DATA`; a licensed historical calendar **BLOCKED BY DATA / PENDING OWNER** |
 | §8 ML lab | ❌ | n/a | v1.2.0, only with enough validated real data |
-| §9.1 Windows dashboard | ⚠️ Overview, Data, Runs, Strategy Lab, Live scanner (read-only), Diagnostics, Settings | n/a | no Replay chart / News context pages yet; GET only |
+| §9.1 Windows dashboard | ⚠️ Overview, Data (incl. news snapshots and feed audits), Runs, Strategy Lab (incl. regime matrix and news comparison), Live scanner (read-only), Diagnostics, Settings | n/a | no Replay chart / separate News context page yet; GET only |
 | §9.2 Android research tab | ❌ | n/a | v1.3.0 |
 | §10 research CLI and config | ✅ `ayesha research …`, `research/config.yaml` | old commands unchanged | safety locks are schema constants |
-| §12 T01–T12 | ⚠️ T01, T03, T05–T08, T10 CI; T02, T04, T09, T12 partial; T11 n/a | | [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md) |
+| §12 T01–T12 | ⚠️ T01–T03, T05–T08, T10 CI; T04, T09, T12 partial; T11 n/a | | [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md) |
 

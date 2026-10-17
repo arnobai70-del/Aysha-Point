@@ -1,4 +1,4 @@
-# AYESHA FX: status (release 1.0.0, 2026-10-16)
+# AYESHA FX: status (release 1.1.0, 2026-10-17)
 
 **Implemented** = code exists. **Tested (CI)** = automated tests on GitHub Actions. **Verified** = seen working on the
 real platform (TradingView account, a real phone, the owner's broker, real market data). Nothing below is verified on
@@ -13,6 +13,11 @@ byte-identical to 0.8.0 (golden fingerprint, plan T06). The phone app stays 0.5.
 Release 1.0.0 adds the research **Strategy Lab** (milestone v1.0.0): the baseline, one control and one experimental
 strategy replayed by one common runner and compared on the same data, split, costs and hypothetical accounts. It is
 still research only; no strategy in it is validated, and none of them can reach the phone.
+Release 1.1.0 adds **market regimes and historical news** to the lab (milestone v1.1.0): an as-of regime label on
+every lab order and a strategy × regime matrix, news gating from a licensed frozen calendar snapshot (legacy or
+upgraded, exactly as the legacy replay), and a feed audit that compares two datasets bar by bar. Regimes are context
+only, never a gate; news direction is still not backtested; no licensed historical calendar and no real data have
+been used yet.
 
 | Part | Implemented | Tested (CI) | Verified on real platform |
 |---|---|---|---|
@@ -40,7 +45,7 @@ still research only; no strategy in it is validated, and none of them can reach 
 | Python ↔ Pine behavior parity | no | no | no |
 | Python ↔ Kotlin wire-format parity (incl. MTF, news notices, capital digest) | yes | shared fixtures + signature and digest vectors | n/a |
 
-### Research plane (0.9.0 foundation, 1.0.0 Strategy Lab; off by default)
+### Research plane (0.9.0 foundation, 1.0.0 Strategy Lab, 1.1.0 regimes and news; off by default)
 
 | Part | Implemented | Tested (CI) | Verified on real platform |
 |---|---|---|---|
@@ -52,7 +57,10 @@ still research only; no strategy in it is validated, and none of them can reach 
 | Read-only dashboard on 127.0.0.1 (key, Host check, GET only, no scripts, redacted, money hidden) | yes | `test_dashboard.py`, `research dashboard --check` (T08) | **pending**: owner PC |
 | `ayesha research` CLI, research doctor, `start-research.bat`, `backup-research.bat`, isolation check | yes | `test_rollback_isolation.py` (T05, T10), `research_smoke.py`, `windows_research_tests.ps1`, `check_research_isolation.py` | **pending**: owner PC |
 | **Strategy Lab (1.0.0)**: strategy contract and loader (baseline A frozen, control B London ORB, exactly one experimental C H1/H4 trend), common runner with the legacy fills and gates (baseline trade-for-trade equal to the legacy replay), cost models and sensitivity, account simulation with the live risk engine, split plan with sealed holdout, after-cost metrics, side-by-side comparison | yes | `test_strategy_lab.py`, `test_lab_runs.py`, `research_smoke.py` (synthetic) | **pending**: real data; no real result exists, so nothing is known about any of the three |
-| Regimes, historical news comparison, ML, phone research tab (v1.1.0 to v1.3.0) | no | no | not started; historical news **BLOCKED BY DATA**, ML only with enough validated data |
+| **Regimes (1.1.0)**: as-of detector `regime-h4-er-slope-vol` 1.0.0 on closed H4 bars (TREND_UP, TREND_DOWN, RANGE, HIGH_VOL, TRANSITION, UNKNOWN; pre-registered thresholds, context only, never a gate), the regime known at decision time on every lab order, strategy × regime matrix (`INSUFFICIENT_SAMPLE` under 30 closed trades), `research regime` | yes | `test_regime_news.py` (causality, warm-up, gap reset, past-only percentile, decision-time labels), `research_smoke.py` (synthetic) | **pending**: real data; no real regime result exists |
+| **Historical news (1.1.0)**: licensed frozen snapshots (`research news-ingest`, PASS / DEGRADED / REJECTED, no licence no import), read only through the legacy point-in-time view, lab and comparison runs with `--news` (none / legacy / upgraded, baseline still equal to the legacy replay), `BLOCKED_BY_DATA` without a snapshot; news direction never backtested | yes | `test_regime_news.py` (licence, integrity, actual masking, parity with the legacy replay in both modes, BLOCKED_BY_DATA, comparison refusals), `research_smoke.py` (synthetic calendar) | **BLOCKED BY DATA**: no licensed historical calendar with `observed_utc` and `actual_published_utc` has been supplied |
+| **Feed audit (1.1.0)**: two datasets of the same pair compared bar by bar with fixed thresholds (MATCHED / DIFFERENT / INSUFFICIENT_OVERLAP), `research feed-audit` | yes | `test_feed_audit_measures_two_feeds` (synthetic) | **pending**: an Exness chart export; Exness parity stays **UNVERIFIED** until one is measured |
+| ML, phone research tab (v1.2.0, v1.3.0) | no | no | not started; ML only with enough validated data |
 
 ## What an alert means
 - **READY** only comes from the PC scanner, signed with the owner's pairing code, fresh, same strategy hash, news
@@ -85,9 +93,12 @@ Step-by-step Bengali guides with expected results: [10-owner-testing-guide.md](1
    (AT-26, I06). Real money is not advised before this and a real-data report exist.
 6. Run `desktop\windows\make-signing-key.bat`, add its four `AYESHA_KEYSTORE_*`/`AYESHA_KEY_*` secrets, keep the key
    offline (AT-23). Back up the journal in the app before every uninstall.
-7. Optional, research (1.0.0): approve the merge of the Strategy Lab pull request (0.9.0 is already merged); then,
-   if you want, follow [12-research-guide.md](12-research-guide.md) (enable, ingest from OANDA practice, `research lab`,
-   report) and send the `lab.md`. Research stays off unless you turn it on.
+7. Optional, research (1.1.0): approve the merge of the regimes and news pull request (0.9.0 and 1.0.0 are already
+   merged); then, if you want, follow [12-research-guide.md](12-research-guide.md) (enable, ingest from OANDA
+   practice, `research lab`, report) and send the `lab.md`. For the news comparison freeze a historical calendar you
+   are licensed to use, with `observed_utc` and `actual_published_utc` (`research news-ingest`), and run
+   `research lab --news ns_…`; for the feed audit ingest an Exness chart export of the same period and run
+   `research feed-audit`. Research stays off unless you turn it on.
 
 See [VERIFICATION.md](VERIFICATION.md), [MASTER_CHECKLIST.md](MASTER_CHECKLIST.md), [FEATURE_MATRIX.md](FEATURE_MATRIX.md)
 and, for research, [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md).

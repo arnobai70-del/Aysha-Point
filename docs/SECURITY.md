@@ -1,4 +1,4 @@
-# Security notes (credentials, workflows, signing, capital, research) — release 1.0.0
+# Security notes (credentials, workflows, signing, capital, research) — release 1.1.0
 
 The repository is **public**. Nothing secret may ever be committed; CI enforces this with
 `scripts/check_no_secrets.py` (OANDA-token shape, private keys, keystores, GitHub/AWS/Telegram tokens).
@@ -51,7 +51,7 @@ signs the APK (`Signing self-test` step) and prints the signer SHA-256 in each r
 - **Orders:** news, capital and scores can only block. Nothing in the PC or phone code can place, modify or close an
   order (`scripts/check_no_order_api.py`).
 
-## Research plane (0.9.0, Strategy Lab 1.0.0)
+## Research plane (0.9.0, Strategy Lab 1.0.0, regimes and news 1.1.0)
 - **Off by default.** Nothing under `%AYESHA_HOME%\research\` exists until `ayesha research enable`. The scanner
   never imports research (CI isolation check), and research cannot import the phone delivery, signing, capital,
   credential or live-registry code, `pickle`/`marshal`/`shelve`, or call `eval`/`exec`/`os.system`/`shell=True`.
@@ -75,6 +75,14 @@ signs the APK (`Signing self-test` step) and prints the signer SHA-256 in each r
   `importlib` of user paths); they receive a copy of the spec and only closed bars; research signal ids (`rs…`) and
   the `RESEARCH` grade cannot be mistaken for live ones. The same isolation rules cover the new modules, and the
   comparison and lab pages go through the same escaping, redaction and GET-only dashboard. No new network access.
+- **Regimes, news snapshots, feed audit (1.1.0):** no new network access and no new dependency. A news calendar is
+  read from a local CSV the owner names (at most 50 MB), parsed by the legacy CSV reader as data, never executed;
+  only its file name (not its path), provider, licence statement and hashes go into the manifest. Snapshots and feed
+  audits are content-addressed `raw` / `exports` artifacts re-hashed on every read, with audit events
+  `NEWS_SNAPSHOT_FROZEN` / `FEED_AUDIT_CREATED`. Provider and licence text and every new dashboard table (news
+  snapshots, feed audits, regime matrix, news comparison) go through the same escaping and redaction
+  (`test_cli_news_regime_feed_audit_and_dashboard`: pages contain no `<script`). The same isolation rules cover the
+  new modules; regime labels and news results cannot open a gate or reach the phone.
 - **Supply chain:** no new dependency. `pip-audit` runs in `research-ci` as information; the `research-ci` workflow
   has `permissions: contents: read` and `persist-credentials: false` and uses no secret.
 - **Data:** owner datasets, `research.db`, reports and logs stay on the PC; only synthetic test data is in the

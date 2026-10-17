@@ -1,8 +1,9 @@
-# Research acceptance (Hybrid AI plan, releases 0.9.0 and 1.0.0)
+# Research acceptance (Hybrid AI plan, releases 0.9.0, 1.0.0 and 1.1.0)
 
 What each research milestone must prove before the owner merges it, and how each point is proven. Source: plan §11
-(v0.9.0 and v1.0.0 acceptance), §12 (T01 to T12), §15 (sign-off) and tickets AI-001 to AI-009 in
-[HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md). v0.9.0 was merged as `aad8dbd`; v1.0.0 is section 1b.
+(v0.9.0, v1.0.0 and v1.1.0 acceptance), §12 (T01 to T12), §15 (sign-off) and tickets AI-001 to AI-011 in
+[HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md). v0.9.0 was merged as `aad8dbd`, v1.0.0 (section 1b) as
+`57b6a71`; v1.1.0 is section 1c.
 
 Status words: **CI** = automated test on GitHub Actions, Ubuntu and Windows (`research-ci` workflow, test named) ·
 **PARTIAL** = part proven, rest said · **PENDING OWNER** = needs the owner's PC, token or decision ·
@@ -37,12 +38,26 @@ market evidence, and none of it shows a trading edge.**
 | Exactly one experimental strategy, collisions detected, spec not writable | CI | `test_registry_has_baseline_control_and_exactly_one_experimental`, `test_baseline_is_the_frozen_live_rules_and_takes_no_parameters`, `test_loader_hands_out_a_copy_of_the_spec` |
 | Legacy path unchanged | CI | The 0.8.0 golden fingerprint and the 65 protected files are unchanged (T06 tests, all still passing) |
 
+## 1c. v1.1.0 regime and news acceptance criteria (plan §11, CP-05)
+
+| Criterion | Status | Evidence (`tests/research/test_regime_news.py`) |
+|---|---|---|
+| No future-based regime labels | CI | `test_regime_labels_are_causal`: every bar after index K changed by 1–5 %; every label detected up to K is identical, labels only appear at H4 closes, and later labels do change. `test_high_vol_percentile_uses_past_values_only` (the current ATR is not part of its own baseline), `test_regime_warmup_and_labels` and `test_regime_data_gap_restarts_the_warmup` (UNKNOWN during warm-up and after a gap over 4 days), `test_lab_orders_carry_the_regime_known_at_decision` (each order has the last label detected at or before its decision time) |
+| Insufficient sample returns `INSUFFICIENT_SAMPLE` | CI | The strategy × regime matrix has every label; cells under 30 closed trades are `INSUFFICIENT_SAMPLE` (`test_lab_without_a_snapshot_blocks_the_news_comparison`); no ranking by regime |
+| Unknown event provenance ⇒ `BLOCKED_BY_DATA` | CI | Without a snapshot news is `NEWS_NOT_MODELLED` and the news comparison is `BLOCKED_BY_DATA` (`test_lab_without_a_snapshot_blocks_the_news_comparison`); an unknown snapshot id is refused with `BLOCKED_BY_DATA` (`test_news_snapshot_integrity_decisions`, `test_lab_with_a_snapshot_compares_news_modes`, CLI exit 2); no licence or no provider ⇒ not imported (`test_news_snapshot_needs_a_licence_and_is_content_addressed`); unparseable files and unknown currencies or impacts are REJECTED and cannot be loaded; rows without `observed_utc` are DEGRADED and say so (`test_news_snapshot_integrity_decisions`) |
+| No positive news prediction claims | CI | News direction is never backtested: every snapshot integrity report and every news result carries `NEWS DIRECTION NOT BACKTESTED` (limitation `NEWS_DIRECTION_NOT_BACKTESTED`); news only blocks or withdraws orders and never changes what a strategy proposes (`test_news_gate_blocks_research_strategies_too`) |
+| Real feed parity remains UNVERIFIED unless measured | CI | `test_feed_audit_measures_two_feeds`: MATCHED / DIFFERENT / INSUFFICIENT_OVERLAP with fixed thresholds (500 common bars, close p95 ≤ 1.0 pip, max ≤ 5.0 pips, ≤ 2 % missing); every audit says neither feed is the broker's truth and Exness parity stays UNVERIFIED unless one side is an Exness export and MATCHED. No Exness export has been measured: PENDING OWNER |
+| Baseline parity with news on | CI | `test_baseline_with_news_equals_the_legacy_replay[seed-mode]` (2 seeds × legacy/upgraded): the baseline through the runner equals the legacy point-in-time news replay trade for trade, including news phase and blockers, and the same news integrity report; `research lab --news` checks it again (`benchmark_parity` MATCHED) |
+| Comparisons only on the same news input | CI | `test_lab_with_a_snapshot_compares_news_modes`: runs with a different snapshot or news mode are refused; each run shows the strategy with news off, legacy and upgraded |
+| Legacy path unchanged | CI | The 0.8.0 golden fingerprint and the 65 protected files are unchanged (T06 tests, all still passing) |
+| Real data | PENDING OWNER / BLOCKED_BY_DATA | All prices and calendar rows in these tests are synthetic. No real-data lab run, no licensed historical calendar with `observed_utc` and `actual_published_utc`, and no Exness chart export exist here |
+
 ## 2. Tests T01 to T12 (plan §12)
 
 | # | Test | Status | Evidence |
 |---|---|---|---|
 | T01 | Snapshot hashing, replay determinism, atomic writes | CI | `test_csv_ingest_is_content_addressed_and_idempotent`, `test_tampered_artifact_is_detected_before_use`, `test_atomic_writes_leave_no_partial_files`, `test_same_inputs_same_run_id_and_hashes_and_verify`, `test_completion_is_atomic_and_never_overwrites_a_finished_run` |
-| T02 | Closed bars, as-of news, future-data mutation, no lookahead | PARTIAL | Bars: `test_t02_future_bars_cannot_change_earlier_decisions` (every bar after index K changed; earlier signals and finished trades identical), the same for all three lab strategies (`test_future_bars_cannot_change_earlier_decisions`), `INCOMPLETE_BAR` / `FUTURE_BAR` rejection tests. News: not modelled by the baseline (`NEWS_NOT_MODELLED` on every result); the legacy point-in-time news replay keeps its own tests (`test_zero_lookahead_future_bars_and_future_actuals_change_nothing`). Research as-of news is v1.1.0 |
+| T02 | Closed bars, as-of news, future-data mutation, no lookahead | CI (synthetic calendar) | Bars: `test_t02_future_bars_cannot_change_earlier_decisions` (every bar after index K changed; earlier signals and finished trades identical), the same for all three lab strategies (`test_future_bars_cannot_change_earlier_decisions`) and for regime labels (`test_regime_labels_are_causal`), `INCOMPLETE_BAR` / `FUTURE_BAR` rejection tests. News (v1.1.0): research reads a snapshot only through the legacy point-in-time view `AsOfCalendar`, whose own test mutates future bars and future actuals (`test_zero_lookahead_future_bars_and_future_actuals_change_nothing`); actuals stay hidden until their publication time (`test_news_snapshot_needs_a_licence_and_is_content_addressed`), and the research runner equals the legacy point-in-time replay trade for trade in both news modes (`test_baseline_with_news_equals_the_legacy_replay`). Without a snapshot news is `NEWS_NOT_MODELLED`. A real licensed calendar: BLOCKED_BY_DATA / PENDING OWNER |
 | T03 | Bid/ask, spread/slippage, stop-first, fee assumptions | CI | The lab runner uses the legacy fills (bar spread, spec slippage, stop wins a bar that touches both, commission 0 for Exness Standard; legacy tests in `test_strategy_backtest.py`). Named cost models with hashes and one-change sensitivity runs (spread +25 %, +50 %, slippage +0.5 pip, one bar late): `test_cost_models_have_ids_and_hashes_and_change_one_thing`, `test_slippage_and_delay_variants`. Only BID high/low and the ASK close are known (see the plan review notes) |
 | T04 | Per-pair Exness spec, Standard/Cent, min lot, hard cap, correlation | PARTIAL | Legacy tests C04–C07, AT-11, AT-15 unchanged. The lab account simulation runs the live `risk.engine.evaluate` on a dynamic equity (`test_account_simulation_uses_the_live_gates`, `test_one_position_per_currency`). Contract values stay ASSUMED (`ASSUMED_EXNESS_STANDARD_CONTRACT`); owner-confirmed values are PENDING OWNER |
 | T05 | Research cannot write the legacy DB, leak the token or produce READY | CI | `test_t05_research_cannot_write_the_live_registry` (mode=ro), `test_live_registry_view_is_read_only_and_hides_money` (file hash before = after), `test_research_files_never_hold_the_token_or_pairing_code`, `test_a_research_decision_can_never_be_ready` (CHECK constraint), `test_research_candidate_can_never_be_ready_or_executable`, `test_outputs_are_research_only_never_ready_or_executable`, `test_static_isolation_rules_hold` |
@@ -67,19 +82,21 @@ market evidence, and none of it shows a trading edge.**
 | AI-007 Read-only research overview | DONE (code) | T08 tests. On the owner's PC: PENDING OWNER |
 | AI-008 StrategyProtocol and controls | DONE (synthetic) | Section 1b; experimental signals never reach READY. Real data: PENDING OWNER |
 | AI-009 Uniform cost-aware comparison | DONE (synthetic) | Section 1b; equal snapshots, split, costs and account, audit events for holdout reveals and comparisons. Real data: PENDING OWNER |
+| AI-010 As-of regime analysis | DONE (synthetic) | Section 1c; no future-regime leakage (`test_regime_labels_are_causal`, `test_high_vol_percentile_uses_past_values_only`, `test_lab_orders_carry_the_regime_known_at_decision`). Real data: PENDING OWNER |
+| AI-011 Historical news integrity path | DONE (synthetic) | Section 1c; missing source ⇒ `BLOCKED_BY_DATA`, no licence ⇒ not imported, REJECTED snapshots unusable. A licensed historical calendar: BLOCKED_BY_DATA / PENDING OWNER |
 
 ## 4. Sign-off checklist for this release (plan §15)
 
 | Item | State |
 |---|---|
-| Baseline regression tests still pass | CI: 179 legacy tests unchanged and passing, plus 141 research tests |
+| Baseline regression tests still pass | CI: 179 legacy tests unchanged and passing, plus 160 research tests |
 | No new order/modify/close endpoint | CI: order-API scan |
 | No change in NO_TRADE and READY guards | CI: protected files byte-identical, golden scanner scenarios |
 | Independent snapshot, reproducible report, event-time provenance | CI on synthetic data; PENDING OWNER on real data |
 | Nothing called "guaranteed" | Every report and dashboard page says research only, not a forecast, no validated edge |
 | Research killed or disabled ⇒ old app works; rollback tested | CI (T07, T10) |
 | Documentation and truthful status | STATUS, VERIFICATION, this file |
-| Owner merge approval | 0.9.0: given (`aad8dbd`). 1.0.0: PENDING OWNER |
+| Owner merge approval | 0.9.0: given (`aad8dbd`). 1.0.0: given (`57b6a71`, PR #3). 1.1.0: PENDING OWNER |
 
 ## 5. What would be needed before any claim of a trading edge (plan §12)
 
@@ -92,15 +109,18 @@ None of these is met. Research results today are replays of synthetic data in CI
 | Net R after costs, worst-case spread/slippage, drawdown, confidence intervals, number of independent trades | Tooling ready (`research lab`: after-cost R with intervals, cost and parameter sensitivity, drawdown, holdout); no real run |
 | Per-pair Exness minimum lot, stops and margin confirmed by the owner | PENDING OWNER (`ayesha confirm-broker`) |
 | ≥ 30 trading days of demo/paper forward observation | PENDING OWNER (AT-26) |
-| Historical news effects | BLOCKED_BY_DATA (no permitted point-in-time calendar) |
+| Historical news effects | Tooling ready (`research news-ingest`, `research lab --news`); BLOCKED_BY_DATA until the owner supplies a licensed point-in-time calendar with `observed_utc` and `actual_published_utc`. News direction is never backtested |
+| Regime breakdown on real data | Tooling ready (strategy × regime matrix); no real run |
+| Feed parity with the owner's Exness account | UNVERIFIED; tooling ready (`research feed-audit`), PENDING OWNER (an Exness chart export) |
 
 ## 6. Reproduce
 
 ```bash
 cd desktop
 pip install -e ".[dev]"
-pytest -q                                   # legacy + research (320 tests)
-pytest -q tests/research                    # research only (141 tests)
+pytest -q                                   # legacy + research (339 tests)
+pytest -q tests/research                    # research only (160 tests)
+pytest -q tests/research/test_regime_news.py  # v1.1.0 regimes, news, feed audit (17 tests)
 cd ..
 python scripts/check_research_isolation.py .
 python scripts/research_smoke.py            # command line end to end in a temporary AYESHA_HOME

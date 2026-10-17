@@ -74,11 +74,26 @@
 | 2026-10-16 | Experimental C = **H4 EMA trend + H1 pullback to its EMA, entry on resumption** | Plan §6.1 names H1/H4 trend continuation; exactly one experimental strategy (§11). Experimental D (order blocks, breakers) is not built |
 | 2026-10-16 | One common runner that calls the legacy fill functions (`backtest.replay._pending/_market/_open`) and the live risk engine's gates instead of a new simulator | Same fills and costs for every strategy, and the baseline reproduces the legacy replay trade for trade, which is checked on every lab run. A copy could drift |
 | 2026-10-16 | The lab compares on M15 bars; A's M5-confirmation mode stays on the 0.9.0 path | B and C are defined on closed M15/H1/H4 bars; mixing confirmation timeframes would make the comparison unequal |
-| 2026-10-16 | News is not modelled in the lab (the strict live news gate is off in research and every result says `NEWS_NOT_MODELLED`) | No permitted point-in-time historical calendar (BLOCKED BY DATA); v1.1.0 |
+| 2026-10-16 | News is not modelled in the lab (the strict live news gate is off in research and every result says `NEWS_NOT_MODELLED`) | No permitted point-in-time historical calendar (BLOCKED BY DATA); v1.1.0. Update 2026-10-17: v1.1.0 adds the licensed snapshot path (`--news ns_…`); without a snapshot this decision still holds |
 | 2026-10-16 | The account simulation uses the live `risk.engine.evaluate` on a changing hypothetical equity, with ASSUMED Exness Standard contract values | The same gates the scanner uses (1 % cap, minimum lot, daily loss, open risk, correlation); owner-confirmed historical contract values do not exist |
 | 2026-10-16 | Ranking only when every strategy has 100+ closed trades, and then only as `IN_SAMPLE_ORDER_ONLY` | Plan §7.2 and §12: small samples prove nothing; hindsight order is not a promotion |
 | 2026-10-16 | Comparisons stored as `exports` artifacts plus audit events, no registry migration | 0.9.0 can still open the research folder after a rollback (RELEASE_ROLLBACK Level 3b) |
 | 2026-10-16 | `research_contracts` 1 → 2 | New `research.comparison/1` schema and additive optional fields on result, candidate and strategy manifests; nothing removed |
+
+### Regimes and historical news (release 1.1.0)
+
+| Date | Decision | Why |
+|---|---|---|
+| 2026-10-17 | v1.1.0 on its own branch `research/v1.1.0` and pull request, like v0.9.0 and v1.0.0 | Owner's choice for every milestone |
+| 2026-10-17 | Regime detector `regime-h4-er-slope-vol` 1.0.0 on closed H4 bars with **pre-registered thresholds** (efficiency ratio 20 bars: trend ≥ 0.35, range ≤ 0.20; EMA(20) slope over 5 bars in ATR: trend ≥ 0.10, range ≤ 0.05; HIGH_VOL at the 90th ATR(14) percentile of the previous 120 values; UNKNOWN in warm-up and after a gap over 4 days); a threshold change needs a new version | Plan §7.1: thresholds need registered research evaluation; fixed before any real data was seen, so they cannot be tuned to a result |
+| 2026-10-17 | Regimes are **context only, never a gate**: the label is recorded on every order and in the strategy × regime matrix and never blocks, allows or sizes anything | Plan §7.1: regime is not an independent permission to trade |
+| 2026-10-17 | Historical news only from a **licensed frozen snapshot** (`research news-ingest` needs a provider and a licence statement), parsed with the legacy CSV reader and read only through the legacy `AsOfCalendar`; no snapshot ⇒ `NEWS_NOT_MODELLED` and the news comparison `BLOCKED_BY_DATA` | Plan §7.3 and §11: only legally permitted history with publication times; unknown provenance must block, not guess |
+| 2026-10-17 | Legacy and upgraded news gating in the runner reuse the legacy replay's code paths (fixed window, or the live `NewsGuard` on the point-in-time view, pending orders withdrawn when news turns against them) instead of a new news model | The baseline must still equal the legacy replay trade for trade with news on (checked on every lab run); a copy could drift |
+| 2026-10-17 | DEGRADED snapshots (rows without `observed_utc`, actuals without a publication time) may be used but are labelled on every result; REJECTED ones (unparseable, unknown currency or impact) cannot be used | Same rule as market datasets: disclose, never repair or hide |
+| 2026-10-17 | News direction (actual vs forecast) is never backtested; every news result says `NEWS DIRECTION NOT BACKTESTED` | Plan §11: no positive news prediction claims |
+| 2026-10-17 | Feed audit with **fixed thresholds**: at least 500 common bars (else `INSUFFICIENT_OVERLAP`); `MATCHED` needs close difference p95 ≤ 1.0 pip, max ≤ 5.0 pips and ≤ 2 % missing bars on either side; otherwise `DIFFERENT` | Plan §11: feed parity stays UNVERIFIED unless measured; neither feed is the broker's truth, and Exness parity needs an Exness export that is MATCHED |
+| 2026-10-17 | News snapshots (`.news.json` manifest + raw `.news.csv`) and feed audits (`.feed-audit.json`) are `exports` / `raw` artifacts with audit events `NEWS_SNAPSHOT_FROZEN` / `FEED_AUDIT_CREATED`; **no registry migration** | Rollback safety: 1.0.0 still opens a research folder written by 1.1.0 (RELEASE_ROLLBACK Level 3c) |
+| 2026-10-17 | `research_contracts` 2 → 3 | New `research.news-snapshot/1` and `research.feed-audit/1` schemas; additive `regime` / `news_phase` on candidates and `news_snapshot_id` / `news_mode` / `regime_detector` on comparisons; nothing removed |
 
 ## Delivery modes
 - **Mode B, PC scanner (canonical, free):** OANDA data → rules + all gates → signed ntfy push → AYESHA app inbox.

@@ -4,9 +4,10 @@ This file keeps the owner's plan **AYESHA-HYBRID-AI-MASTER-001 v1.0** (2026-10-1
 the repository carries the design it is built from. Source file SHA-256:
 `1b27b361e7b850905255ab7bac027e02ead2dcd3dc93ee84b60d92025b06fa94`.
 
-Status: v0.9.0 (research foundation) is merged to `main` (`aad8dbd`). **v1.0.0 (Strategy Lab) is built on branch
-`research/v1.0.0`** and waits for the owner's merge approval. v1.1.0 to v1.3.0 are not started. There is **no
-validated trading edge yet**; nothing in the research plane is a trade signal.
+Status: v0.9.0 (research foundation) is merged to `main` (`aad8dbd`), v1.0.0 (Strategy Lab) is merged to `main`
+(`57b6a71`, PR #3). **v1.1.0 (regimes and historical news) is built on branch `research/v1.1.0`** and waits for the
+owner's merge approval. v1.2.0 and v1.3.0 are not started. There is **no validated trading edge yet**; nothing in
+the research plane is a trade signal.
 
 ## Review notes (CP-00 audit, 2026-10-16)
 
@@ -55,6 +56,19 @@ the corrections; the plan text below is left unchanged.
 | §6.4 metrics | after-cost R with intervals, NO_TRADE and not-filled shares, folds, in/out-of-sample, sealed holdout, symbol/session/direction breakdowns, cost and parameter sensitivity, without-best-5 %, tails, losing streaks, exposure | Regime breakdown is `NOT_MODELLED` until v1.1.0; Sharpe only with 30+ closed trades |
 | §10.1 `compare` | `ayesha research strategies`, `lab`, `run <strategy>`, `compare`, `comparisons`, `report cmp_…` | Comparisons are stored as `exports` artifacts and audit events, without a new registry table, so a rollback to 0.9.0 still reads the folder |
 | §9.1 Strategy Lab page | dashboard `/lab` (strategies, comparisons), comparison and lab run pages with sanitised exports | Read-only as before |
+
+## How 1.1.0 maps to the plan (§7, CP-05, AI-010, AI-011), and where it differs
+
+| Plan | Built in 1.1.0 | Why it differs |
+|---|---|---|
+| §7.1 regime labels TREND_UP / TREND_DOWN / RANGE / HIGH_VOL / TRANSITION / UNKNOWN from as-of closed bars | `regimes/detector.py`, `regime-h4-er-slope-vol` 1.0.0: on each closed H4 bar (legacy aggregator), Kaufman efficiency ratio over 20 bars, EMA(20) slope in ATR units, ATR(14) percentile among the previous 120 values (past only); UNKNOWN during warm-up and after a gap longer than 4 days; each label carries its feature values, detection time and the detector's code hash | Thresholds were pre-registered before any real data was seen and are not tuned; a change needs a new detector version. Labels are computed once, forward in time, never rewritten. Context only: never a gate and never a reason to trade |
+| §7.2 strategy × regime matrix, regime known at entry time, sparse cells `INSUFFICIENT_SAMPLE` | every lab order stores the label known when it was decided (`LabTrade.regime`, candidates `regime`); results have a matrix with every label, cells under 30 closed trades are `INSUFFICIENT_SAMPLE`; comparisons show the matrices side by side; `ayesha research regime --dataset D --symbol S` | No ranking by regime; on CI data every cell is synthetic and small |
+| §7.3 `news_asof`: event timing, forecast/actual publication time, provider audit; missing history `BLOCKED_BY_DATA` | `datasets/news_snapshot.py` (`research.news-snapshot/1`): a calendar the owner is licensed to use is frozen like a dataset (raw bytes kept, content hash, provider and licence, integrity report PASS / DEGRADED / REJECTED), parsed with the legacy CSV reader and read only through the legacy point-in-time view `AsOfCalendar` (rows after `observed_utc`, actuals after `actual_published_utc`); `ayesha research news-ingest`, `news` | No licence or source ⇒ not imported; unknown snapshot ⇒ `BLOCKED_BY_DATA`; REJECTED snapshots cannot be used; DEGRADED ones (no `observed_utc`, actuals without a publication time) may be used but say so on every result. No historical calendar is bundled |
+| §7.3 reuse `news.guard`, reaction analysis informational only | `simulation/runner.py` gates news with the legacy replay's own code paths: `legacy` (fixed window) or `upgraded` (the live `NewsGuard` on the point-in-time calendar, closed M5 bars, pending orders withdrawn when news turns against them); lab and comparison runs take `--news ns_… [--news-mode]` and show each strategy with news off, legacy and upgraded | Reused instead of rewritten, so the baseline still equals the legacy replay trade for trade with news on, in both modes. News direction (actual vs forecast) is never backtested; every news result says `NEWS DIRECTION NOT BACKTESTED` |
+| §11 v1.1.0 broker-feed mismatch audit | `datasets/feed_audit.py` (`research.feed-audit/1`): two datasets of the same pair compared bar by bar (overlap, missing bars each side, OHLC and spread differences in pips) with fixed thresholds: MATCHED, DIFFERENT or INSUFFICIENT_OVERLAP; `ayesha research feed-audit`, `feed-audits` | Thresholds are fixed, not tuned: at least 500 common bars, close difference p95 ≤ 1.0 pip and max ≤ 5.0 pips, at most 2 % missing. Neither feed is the broker's truth; Exness parity stays UNVERIFIED unless one side is an Exness export of the same pair and the audit says MATCHED |
+| §5.4 storage | snapshots (`.news.json` manifest + raw `.news.csv`) and feed audits (`.feed-audit.json`) are `exports` / `raw` artifacts with audit events `NEWS_SNAPSHOT_FROZEN` / `FEED_AUDIT_CREATED` | No registry migration, so 1.0.0 still opens a research folder written by 1.1.0 |
+| §9.1 News Context page | Data page lists news snapshots and feed audits; comparison and lab run pages show the regime matrix and the news comparison; candidates show regime and news phase | No separate News Context page or replay chart yet; read-only as before |
+| §4 contracts | `research_contracts` 3: `research.news-snapshot/1`, `research.feed-audit/1`; additive `regime` / `news_phase` on candidates and `news_snapshot_id` / `news_mode` / `regime_detector` on comparisons | Nothing removed; spec 0.4.0, signal schema 1.1 and wire 4 unchanged |
 
 Related: [RESEARCH_DATA_POLICY.md](RESEARCH_DATA_POLICY.md) · [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md) ·
 [MODEL_GOVERNANCE.md](MODEL_GOVERNANCE.md) · [RELEASE_ROLLBACK.md](RELEASE_ROLLBACK.md) ·

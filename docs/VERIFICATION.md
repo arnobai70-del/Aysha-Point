@@ -1,4 +1,4 @@
-# Verification checklist (acceptance tests, updated for 1.0.0)
+# Verification checklist (acceptance tests, updated for 1.1.0)
 
 Legend: **CI** = proven by an automated test on GitHub Actions (test name given) · **PARTIAL** = part proven, rest pending ·
 **PENDING OWNER** = needs the owner's account, phone or authorization · **OPEN** = not built yet.
@@ -91,16 +91,16 @@ fixture data: none of these proves that the strategy or the news protection make
 | I05 | Real Windows PC, Android 13 phone, Pine compile, owner-confirmed Exness specs stay PENDING OWNER | PENDING OWNER | Not observed yet. Checklist: [11-news-and-capital-guide.md](11-news-and-capital-guide.md) section জ and [10-owner-testing-guide.md](10-owner-testing-guide.md) |
 | I06 | Forward-paper period specified; live money not advertised as verified | PENDING OWNER | Period: at least 30 trading days on demo or paper, every READY journaled (docs/11 section জ, AT-26). README and STATUS say there is no validated trading edge |
 
-## Hybrid AI plan: research foundation (0.9.0) and Strategy Lab (1.0.0)
+## Hybrid AI plan: research foundation (0.9.0), Strategy Lab (1.0.0), regimes and news (1.1.0)
 
 Tests T01–T12 of plan §12. Python tests are in `desktop/tests/research/` and run in `ci` and `research-ci` on Ubuntu
 and Windows. All data is synthetic: none of this shows a trading edge. Full mapping, plan acceptance criteria and
-tickets AI-001 to AI-009: [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md).
+tickets AI-001 to AI-011: [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md).
 
 | # | Requirement | Status | Evidence / what is missing |
 |---|---|---|---|
 | T01 | Snapshot hashing, replay determinism, atomic writes | CI | `test_csv_ingest_is_content_addressed_and_idempotent`, `test_tampered_artifact_is_detected_before_use`, `test_atomic_writes_leave_no_partial_files`, `test_same_inputs_same_run_id_and_hashes_and_verify` |
-| T02 | Closed bars, as-of news, future-data mutation, no lookahead | PARTIAL | `test_t02_future_bars_cannot_change_earlier_decisions`, `test_future_bars_cannot_change_earlier_decisions` (lab A, B, C), `INCOMPLETE_BAR`/`FUTURE_BAR` rejection; news is not modelled by research (`NEWS_NOT_MODELLED`) until v1.1.0 |
+| T02 | Closed bars, as-of news, future-data mutation, no lookahead | CI (synthetic calendar) | `test_t02_future_bars_cannot_change_earlier_decisions`, `test_future_bars_cannot_change_earlier_decisions` (lab A, B, C), `test_regime_labels_are_causal`, `INCOMPLETE_BAR`/`FUTURE_BAR` rejection; news snapshots are read only through the legacy point-in-time `AsOfCalendar` (actual masking in `test_news_snapshot_needs_a_licence_and_is_content_addressed`, parity with the legacy point-in-time replay in both modes in `test_baseline_with_news_equals_the_legacy_replay`). A real licensed calendar: BLOCKED BY DATA |
 | T03 | Bid/ask, spread/slippage, stop-first, fees | CI | Legacy fills and their tests (`test_strategy_backtest.py`); named cost models and sensitivity (`test_cost_models_have_ids_and_hashes_and_change_one_thing`, `test_slippage_and_delay_variants`), intrabar flags (`test_intrabar_ambiguity_is_flagged`) |
 | T04 | Per-pair Exness spec, Standard/Cent, min lot, hard cap, correlation | PARTIAL | Legacy C04–C07, AT-11, AT-15 unchanged; lab accounts use the live risk engine (`test_account_simulation_uses_the_live_gates`, `test_one_position_per_currency`) with `ASSUMED_EXNESS_STANDARD_CONTRACT` and hypothetical equity only |
 | T05 | Research cannot write the live DB, leak the token or produce READY | CI | `test_t05_research_cannot_write_the_live_registry`, `test_research_files_never_hold_the_token_or_pairing_code`, `test_a_research_decision_can_never_be_ready`, `test_outputs_are_research_only_never_ready_or_executable`, `test_static_isolation_rules_hold` |
@@ -112,4 +112,7 @@ tickets AI-001 to AI-009: [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md).
 | T11 | Android old payloads, signing, journal | N/A | Android unchanged; no APK published for 0.9.0 |
 | T12 | Dependency lock, vulnerability scan, forbidden imports, order API | PARTIAL | `test_t12_base_dependencies_unchanged_and_versions_consistent`, isolation and order-API scans; `pip-audit` informational in `research-ci`; no lock file (OPEN) |
 | AI-008/009 | Strategy contract, controls, uniform cost-aware comparison | CI (synthetic) | `test_strategy_lab.py`, `test_lab_runs.py`, `research_smoke.py`; plan acceptance in RESEARCH_ACCEPTANCE section 1b |
-| R-OWNER | Real-data ingest, baseline run, parity, lab and dashboard on the owner's PC | PENDING OWNER | [12-research-guide.md](12-research-guide.md) |
+| AI-010 | As-of regime analysis, no future-regime leakage, `INSUFFICIENT_SAMPLE` cells | CI (synthetic) | `test_regime_labels_are_causal`, `test_regime_warmup_and_labels`, `test_regime_data_gap_restarts_the_warmup`, `test_high_vol_percentile_uses_past_values_only`, `test_lab_orders_carry_the_regime_known_at_decision`; plan acceptance in RESEARCH_ACCEPTANCE section 1c |
+| AI-011 | Historical news integrity path: missing source ⇒ `BLOCKED_BY_DATA`, no news direction claims | CI (synthetic) + BLOCKED BY DATA | `test_news_snapshot_needs_a_licence_and_is_content_addressed`, `test_news_snapshot_integrity_decisions`, `test_baseline_with_news_equals_the_legacy_replay`, `test_news_gate_blocks_research_strategies_too`, `test_lab_without_a_snapshot_blocks_the_news_comparison`, `test_lab_with_a_snapshot_compares_news_modes`, `test_cli_news_regime_feed_audit_and_dashboard`, `research_smoke.py`. No licensed historical calendar with `observed_utc` and `actual_published_utc` exists here |
+| Feed audit | Broker-feed mismatch measured, never assumed | CI (synthetic) + PENDING OWNER | `test_feed_audit_measures_two_feeds`; Exness parity stays UNVERIFIED until an Exness chart export is audited and MATCHED |
+| R-OWNER | Real-data ingest, baseline run, parity, lab (with and without `--news`), regimes, feed audit and dashboard on the owner's PC | PENDING OWNER | [12-research-guide.md](12-research-guide.md) |

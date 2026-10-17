@@ -209,7 +209,7 @@ Full test mapping: [VERIFICATION.md](VERIFICATION.md) (N01–N12, C01–C10, I01
 | Real PC, Android 13, Pine compile, Exness specs observed (I05) | OWNER | not observed yet |
 | Forward paper period before real money (I06) | OWNER | at least 30 trading days on demo/paper (docs/11 section জ) |
 
-## Hybrid Advanced AI plan v1.0 (release 0.9.0)
+## Hybrid Advanced AI plan v1.0 (releases 0.9.0 to 1.1.0)
 Plan: [HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md). Test mapping: [RESEARCH_ACCEPTANCE.md](RESEARCH_ACCEPTANCE.md).
 
 | Item | Status | Evidence / note |
@@ -225,6 +225,8 @@ Plan: [HYBRID_AI_MASTER_PLAN.md](HYBRID_AI_MASTER_PLAN.md). Test mapping: [RESEA
 | Docs: data policy, acceptance, governance, rollback, Bangla guide | DONE | docs/RESEARCH_*.md, MODEL_GOVERNANCE.md, RELEASE_ROLLBACK.md, 12-research-guide.md |
 | Owner merge approval of the v0.9.0 pull request | DONE | merged to `main` as `aad8dbd` by the owner |
 | v1.0.0 Strategy Lab: contract, loader, A/B/C, common runner, costs, accounts, split plan, metrics, comparison, CLI, dashboard | DONE (synthetic) | `test_strategy_lab.py`, `test_lab_runs.py`, `research_smoke.py`; real data PENDING OWNER |
-| Owner merge approval of the v1.0.0 pull request | OWNER | branch `research/v1.0.0` |
-| v1.1.0 to v1.3.0 (regimes, ML, phone research tab) | OPEN | not started; each needs the owner's go-ahead |
+| Owner merge approval of the v1.0.0 pull request | DONE | merged to `main` as `57b6a71` (PR #3) by the owner |
+| v1.1.0 regimes and historical news: as-of regime detector, strategy × regime matrix, licensed news snapshots, news gating in the lab (legacy/upgraded, parity with the legacy replay), feed audit, CLI, dashboard | DONE (synthetic) | `test_regime_news.py` (17 tests), `research_smoke.py`; real data, a licensed historical calendar and an Exness export PENDING OWNER / BLOCKED BY DATA |
+| Owner merge approval of the v1.1.0 pull request | OWNER | branch `research/v1.1.0` |
+| v1.2.0 to v1.3.0 (ML, phone research tab) | OPEN | not started; each needs the owner's go-ahead |
 

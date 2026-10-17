@@ -1,4 +1,4 @@
-# Research data policy (research plane, release 0.9.0)
+# Research data policy (research plane, releases 0.9.0 to 1.1.0)
 
 Applies to everything under `ayesha research …` and `%AYESHA_HOME%\research\` (default
 `%USERPROFILE%\AyeshaFX\research\`). Research is **off by default** and research-only: it never produces READY, never
@@ -10,14 +10,23 @@ sends anything to the phone and never places orders. The live scanner does not r
 |---|---|---|
 | OANDA v20 **practice** | `ayesha research ingest --provider oanda --pairs EURUSD --days 730`. Uses the legacy read-only adapter `ayesha.feed.oanda_feed.OandaFeed` (GET candles, `price=BA`, complete bars only) with the token `install.bat` saved on this PC. The live environment is refused | "OANDA v20 practice API data downloaded with the owner's own token for personal, non-commercial research on this PC; not for redistribution (see OANDA's API terms)" |
 | Owner CSV files | `ayesha research ingest --from-csv-dir FOLDER`. Files named `<PAIR>_M15.csv` / `<PAIR>_M5.csv` in the legacy format written by `ayesha export` and `backtest-local.bat` | "Owner-supplied file; its licence is whatever its source allows (not verified by AYESHA)". The owner is responsible for having the right to use it |
+| Owner historical news calendar (1.1.0) | `ayesha research news-ingest --csv FILE --provider NAME --license "..."`. The legacy calendar CSV format that `ayesha report --news` takes (`time_utc,currency,impact,title`, optional `forecast`, `actual`, `actual_published_utc`, `observed_utc` and the other legacy columns) | The owner's own licence statement, written into the snapshot manifest as given. No provider or no licence statement: the file is not imported. AYESHA does not verify the licence; the owner is responsible for having the right to use it |
 
 Not allowed: scraping web pages or TradingView, unlicensed feeds, getting around rate limits, CAPTCHAs or anti-bot
 measures, and any Exness login. OANDA requests are paced (at least 0.2 s apart), transient errors are retried with
 exponential backoff, and HTTP 401/403 stops at once with a message that contains no secret.
 
-**News history:** no historical calendar is used in 0.9.0. Every result carries `NEWS_NOT_MODELLED` and a warning
-that the live news gate would block some setups. A point-in-time historical calendar is a v1.1.0 item and stays
-`BLOCKED_BY_DATA` until the owner supplies one they are allowed to use.
+**News history:** no historical calendar is bundled or downloaded. From 1.1.0 the owner can freeze one they are
+allowed to use as a news snapshot (`research.news-snapshot/1`, id `ns_` + the first 16 hex characters of the raw
+file's SHA-256): the raw bytes are kept as received and an integrity report decides **PASS**, **DEGRADED** (rows
+without `observed_utc`, so the schedule is the file's final view and not what was known at the time
+(`SCHEDULE_NOT_POINT_IN_TIME`), or actuals without a publication time, which are then never shown; usable,
+labelled on every result) or **REJECTED** (missing required columns, does not parse or has no events, unknown currency or impact;
+never used). Replays read a snapshot only
+through the legacy point-in-time view: a row appears after its `observed_utc`, an actual only after its
+`actual_published_utc`. News direction (actual vs forecast) is never backtested (`NEWS DIRECTION NOT BACKTESTED`).
+Without a snapshot every result carries `NEWS_NOT_MODELLED`, a warning that the live news gate would block some
+setups, and the news comparison is `BLOCKED_BY_DATA`. No licensed historical calendar has been supplied yet.
 
 **Capital and credentials:** research never reads `capital.json`, `broker-confirmed.json` or the pairing code, and
 cannot import the capital, signing, delivery or credential modules (the isolation check in CI forbids it). The only
@@ -35,7 +44,8 @@ the OANDA practice balance is never used as capital.
   normalized\      research.market_bar/1 rows (JSON Lines), one file per symbol and timeframe
   quality\         research.quality_report/1, one per partition
   manifests\       one write-once research.dataset_manifest/1 per dataset
-  runs\ candidates\ exports\   run results, research candidates, exported reports
+  runs\ candidates\ exports\   run results, research candidates, exported reports (also comparisons, news
+                   snapshot manifests *.news.json and feed audits *.feed-audit.json; raw news CSVs are in raw\)
   backups\         rotating verified registry backups (pre-restore copies in backups\pre-restore\)
   logs\            redacted worker logs
   jobs\            worker job and result files
@@ -62,7 +72,12 @@ the OANDA practice balance is never used as capital.
 - Nothing is forward-filled, repaired, interpolated or synthesised. A broken row is counted in the quality report with
   its line number; the raw artifact keeps everything as received.
 - Prices are the data provider's, not Exness's (`PRICES_NOT_EXNESS`). Exness quotes and spreads differ; feed parity
-  with Exness is `UNVERIFIED` until measured on matching real observations.
+  with Exness is `UNVERIFIED` until measured on matching real observations. From 1.1.0 `ayesha research feed-audit
+  --a DS1 --b DS2 --symbol EURUSD` measures two datasets of the same pair bar by bar (overlap, missing bars each
+  side, OHLC and spread differences in pips) with fixed thresholds: `MATCHED` (at least 500 common bars, close
+  difference p95 ≤ 1.0 pip and max ≤ 5.0 pips, at most 2 % missing), `DIFFERENT` or `INSUFFICIENT_OVERLAP`. Neither
+  feed is the broker's truth; Exness parity stays `UNVERIFIED` unless one side is an Exness export of the same pair
+  and the audit says `MATCHED`. No Exness export has been audited yet.
 
 ## 4. Quality gate
 
